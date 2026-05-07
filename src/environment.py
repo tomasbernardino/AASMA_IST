@@ -1,3 +1,4 @@
+import numpy as np
 
 
 class LiquidityReserveEnvironment:
@@ -13,6 +14,10 @@ class LiquidityReserveEnvironment:
 
     This is a scalar model (no spatial dimension), designed to
     isolate the effects of decision-making and coordination.
+
+    Optionally, the environment can introduce stochasticity via:
+    - Noise on the recovery rate (Gaussian perturbation each step)
+    - Random liquidity shocks (sudden drops in reserve)
     """
 
     def __init__(
@@ -21,6 +26,10 @@ class LiquidityReserveEnvironment:
         reserve_capacity=100,
         recovery_rate=0.3,
         crisis_threshold=5,
+        recovery_noise_std=0.0,
+        shock_probability=0.0,
+        shock_magnitude=10.0,
+        rng=None,
     ):
         """
         Parameters:
@@ -38,12 +47,31 @@ class LiquidityReserveEnvironment:
         crisis_threshold:
             If the reserve falls below this value, the system is considered
             to be in a liquidity crisis.
+
+        recovery_noise_std:
+            Standard deviation of Gaussian noise added to the recovery rate
+            at each step. Set to 0.0 for deterministic behavior.
+
+        shock_probability:
+            Probability of a sudden liquidity shock at each step.
+            Set to 0.0 to disable shocks.
+
+        shock_magnitude:
+            Size of the reserve drop when a shock occurs.
+
+        rng:
+            A numpy random Generator for reproducibility.
+            If None, a default generator is created.
         """
         self.initial_reserve = initial_reserve
         self.reserve_capacity = reserve_capacity
         self.recovery_rate = recovery_rate
         self.crisis_threshold = crisis_threshold
-        
+        self.recovery_noise_std = recovery_noise_std
+        self.shock_probability = shock_probability
+        self.shock_magnitude = shock_magnitude
+        self.rng = rng if rng is not None else np.random.default_rng()
+
         # Current state of the environment
         self.reserve = initial_reserve
         self.timestep = 0
@@ -67,10 +95,19 @@ class LiquidityReserveEnvironment:
             L = current liquidity reserve
             K = reserve capacity
 
+        When recovery_noise_std > 0, the rate r is perturbed each step
+        by additive Gaussian noise (clamped so that r stays non-negative).
+
         Returns:
             Amount of liquidity recovered in this step.
         """
-        return self.recovery_rate * self.reserve * (1 - self.reserve / self.reserve_capacity)
+        rate = self.recovery_rate
+
+        if self.recovery_noise_std > 0:
+            noise = self.rng.normal(0, self.recovery_noise_std)
+            rate = max(0.0, rate + noise)
+
+        return rate * self.reserve * (1 - self.reserve / self.reserve_capacity)
 
     def step(self, withdrawals):
         """
@@ -93,6 +130,11 @@ class LiquidityReserveEnvironment:
 
         # Apply budget recovery and update the liquidity reserve.
         self.reserve = self.reserve + self.budget_recovery() - total_withdrawal
+
+        # Apply random liquidity shock (market crisis, unexpected expense).
+        if self.shock_probability > 0 and self.rng.random() < self.shock_probability:
+            self.reserve -= self.shock_magnitude
+
         self.reserve = max(0, min(self.reserve_capacity, self.reserve))
 
         self.timestep += 1

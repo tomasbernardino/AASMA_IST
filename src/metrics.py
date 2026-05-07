@@ -24,7 +24,7 @@ def gini(values):
     return (n + 1 - 2 * np.sum(cumulative) / cumulative[-1]) / n
 
 
-def compute_metrics(history, departments, max_steps=100):
+def compute_metrics(history, departments, max_steps=100, wall_time_seconds=None, seed=None):
     """
     Compute summary metrics for one simulation run.
     """
@@ -54,6 +54,7 @@ def compute_metrics(history, departments, max_steps=100):
 
     return {
         "mechanism": history[0]["mechanism"] if history else "unknown",
+        "seed": seed,
         "final_reserve": final_reserve,
         "average_reserve": average_reserve,
         "liquidity_crisis": crisis,
@@ -64,4 +65,5 @@ def compute_metrics(history, departments, max_steps=100):
         "reward_inequality_gini": gini(total_reward_per_department),
         "total_messages": total_messages,
         "total_rounds": total_rounds,
+        "wall_time_seconds": wall_time_seconds,
     }

@@ -1,6 +1,11 @@
+import time
+
+import numpy as np
+
 from src.actions import ACTION_TO_WITHDRAWAL
 
-def run_simulation(environment, departments, coordination, max_steps=100):
+
+def run_simulation(environment, departments, coordination, max_steps=100, seed=None):
     """
     Run one simulation episode.
 
@@ -9,10 +14,18 @@ def run_simulation(environment, departments, coordination, max_steps=100):
         departments: list of Department objects
         coordination: coordination mechanism object
         max_steps: number of time steps
+        seed: optional integer seed for reproducibility
 
     Returns:
         history: list of dictionaries with all relevant data
+        elapsed_seconds: wall-clock time of the simulation
     """
+    # Seed the environment random generator for reproducibility.
+    if seed is not None:
+        environment.rng = np.random.default_rng(seed)
+
+    start_time = time.perf_counter()
+
     # Reset environment and departments.
     reserve = environment.reset()
 
@@ -76,4 +89,6 @@ def run_simulation(environment, departments, coordination, max_steps=100):
         if crisis:
             break
 
-    return history
+    elapsed_seconds = time.perf_counter() - start_time
+
+    return history, elapsed_seconds

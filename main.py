@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from src.environment import LiquidityReserveEnvironment
@@ -12,7 +13,11 @@ from src.coordination import (
 )
 from src.simulation import run_simulation
 from src.metrics import compute_metrics
-from src.plotting import plot_liquidity_histories
+from src.plotting import (
+    plot_liquidity_confidence_bands,
+    plot_metrics_comparison,
+    plot_action_distributions,
+)
 
 
 def create_departments():
@@ -30,12 +35,25 @@ def create_departments():
     ]
 
 
-def create_environment():
-    return LiquidityReserveEnvironment() # Using default parameters for the environment, this can be customized if needed.
-  
+def create_environment(rng=None):
+    """
+    Create the liquidity reserve environment.
+
+    Stochastic parameters are used so that different seeds produce
+    different trajectories, making multi-seed analysis meaningful.
+    """
+    return LiquidityReserveEnvironment(
+        recovery_noise_std=0.05,
+        shock_probability=0.05,
+        shock_magnitude=10.0,
+        rng=rng,
+    )
+
 
 def main():
     max_steps = 100
+    n_seeds = 20
+
     Path("results/raw").mkdir(parents=True, exist_ok=True)
     Path("results/figures").mkdir(parents=True, exist_ok=True)
 
@@ -46,40 +64,85 @@ def main():
         DebateCoordination(),
     ]
 
-    histories = {}
-    metrics = []
+    # Collect all histories (for plotting) and all per-run metrics (for CSV).
+    all_histories = {}  # mechanism_name -> list of histories
+    all_metrics = []
 
     for mechanism in coordination_mechanisms:
-        environment = create_environment()
-        departments = create_departments()
+        mechanism_histories = []
 
-        history = run_simulation(
-            environment=environment,
-            departments=departments,
-            coordination=mechanism,
-            max_steps=max_steps,
-        )
+        for seed in range(n_seeds):
+            environment = create_environment()
+            departments = create_departments()
 
-        histories[mechanism.name] = history
+            history, elapsed = run_simulation(
+                environment=environment,
+                departments=departments,
+                coordination=mechanism,
+                max_steps=max_steps,
+                seed=seed,
+            )
 
-        run_metrics = compute_metrics(
-            history=history,
-            departments=departments,
-            max_steps=max_steps,
-        )
+            mechanism_histories.append(history)
 
-        metrics.append(run_metrics)
+            run_metrics = compute_metrics(
+                history=history,
+                departments=departments,
+                max_steps=max_steps,
+                wall_time_seconds=elapsed,
+                seed=seed,
+            )
 
-    metrics_df = pd.DataFrame(metrics)
+            all_metrics.append(run_metrics)
 
-    print("\n=== Comparison Metrics ===")
-    print(metrics_df)
+        all_histories[mechanism.name] = mechanism_histories
 
-    metrics_df.to_csv("results/raw/first_comparison.csv", index=False)
+    # --- Detailed CSV: one row per (mechanism, seed) ---
 
-    plot_liquidity_histories(
-        histories_by_mechanism=histories,
-        output_path="results/figures/liquidity_comparison.png",
+    detailed_df = pd.DataFrame(all_metrics)
+    detailed_df.to_csv("results/raw/detailed_runs.csv", index=False)
+
+    # --- Aggregated CSV: one row per mechanism (mean ± std) ---
+
+    numeric_cols = [
+        "final_reserve", "average_reserve", "steps_survived",
+        "total_withdrawal", "average_reward", "reward_inequality_gini",
+        "total_messages", "total_rounds", "wall_time_seconds",
+    ]
+
+    aggregated_rows = []
+    for mechanism in coordination_mechanisms:
+        mech_df = detailed_df[detailed_df["mechanism"] == mechanism.name]
+        row = {"mechanism": mechanism.name}
+        for col in numeric_cols:
+            row[f"{col}_mean"] = mech_df[col].mean()
+            row[f"{col}_std"] = mech_df[col].std()
+        row["crisis_rate"] = mech_df["liquidity_crisis"].mean()
+        aggregated_rows.append(row)
+
+    aggregated_df = pd.DataFrame(aggregated_rows)
+
+    print("\n=== Aggregated Metrics (mean ± std over {} seeds) ===".format(n_seeds))
+    print(aggregated_df.to_string(index=False))
+
+    aggregated_df.to_csv("results/raw/aggregated_comparison.csv", index=False)
+
+    # --- Plots ---
+
+    plot_liquidity_confidence_bands(
+        all_histories_by_mechanism=all_histories,
+        max_steps=max_steps,
+        output_path="results/figures/reserve_confidence_bands.png",
+    )
+
+    plot_metrics_comparison(
+        aggregated_df=aggregated_df,
+        output_path="results/figures/metrics_comparison.png",
+    )
+
+    plot_action_distributions(
+        all_histories_by_mechanism=all_histories,
+        output_path="results/figures/action_distributions.png",
     )
 
 
