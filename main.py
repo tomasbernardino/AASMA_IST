@@ -8,8 +8,9 @@ from src.agents import Department
 from src.coordination import (
     IndependentCoordination,
     VotingCoordination,
+    AdaptiveVotingCoordination,
     CentralizedCoordination,
-    DebateCoordination,
+    StructuredDebateCoordination,
 )
 from src.simulation import run_simulation
 from src.metrics import compute_metrics
@@ -21,17 +22,35 @@ from src.plotting import (
 
 
 def create_departments():
-    """
-    Create the same group of departments for each mechanism.
-
-    To compare coordination fairly, the department composition must be equal.
-    """
+    """Standard composition: 2 profit + 1 sustainability + 1 balanced + 1 risk_averse."""
     return [
-        Department("Growth Department", "profit"),
-        Department("Trading/Opportunity Team", "profit"),
-        Department("Compliance Department", "sustainability"),
-        Department("Operations Department", "balanced"),
-        Department("Risk Department", "risk_averse"),
+        Department("Growth Department", "profit", reserve_capacity=100),
+        Department("Trading/Opportunity Team", "profit", reserve_capacity=100),
+        Department("Compliance Department", "sustainability", reserve_capacity=100),
+        Department("Operations Department", "balanced", reserve_capacity=100),
+        Department("Risk Department", "risk_averse", reserve_capacity=100),
+    ]
+
+
+def create_departments_aggressive():
+    """Aggressive composition: 3 profit + 1 balanced + 1 risk_averse."""
+    return [
+        Department("Growth Department", "profit", reserve_capacity=100),
+        Department("Trading/Opportunity Team", "profit", reserve_capacity=100),
+        Department("Investment Department", "profit", reserve_capacity=100),
+        Department("Operations Department", "balanced", reserve_capacity=100),
+        Department("Risk Department", "risk_averse", reserve_capacity=100),
+    ]
+
+
+def create_departments_conservative():
+    """Conservative composition: 1 profit + 2 sustainability + 1 balanced + 1 risk_averse."""
+    return [
+        Department("Growth Department", "profit", reserve_capacity=100),
+        Department("Compliance Department", "sustainability", reserve_capacity=100),
+        Department("ESG Department", "sustainability", reserve_capacity=100),
+        Department("Operations Department", "balanced", reserve_capacity=100),
+        Department("Risk Department", "risk_averse", reserve_capacity=100),
     ]
 
 
@@ -60,42 +79,53 @@ def main():
     coordination_mechanisms = [
         IndependentCoordination(),
         VotingCoordination(),
-        CentralizedCoordination(leader_index=1), # For now, the Trading/Opportunity Team is the leader in the centralized mechanism.
-        DebateCoordination(),
+        AdaptiveVotingCoordination(),
+        CentralizedCoordination(leader_index=1, name_suffix="_profit"),
+        CentralizedCoordination(leader_index=2, name_suffix="_sustainability"),
+        CentralizedCoordination(leader_index=4, name_suffix="_risk_averse"),
+        StructuredDebateCoordination(),
     ]
+
+    compositions = {
+        "standard": create_departments,
+        "aggressive": create_departments_aggressive,
+        "conservative": create_departments_conservative,
+    }
 
     # Collect all histories (for plotting) and all per-run metrics (for CSV).
     all_histories = {}  # mechanism_name -> list of histories
     all_metrics = []
 
-    for mechanism in coordination_mechanisms:
-        mechanism_histories = []
+    for composition_name, dept_factory in compositions.items():
+        for mechanism in coordination_mechanisms:
+            mechanism_histories = []
 
-        for seed in range(n_seeds):
-            environment = create_environment()
-            departments = create_departments()
+            for seed in range(n_seeds):
+                environment = create_environment()
+                departments = dept_factory()
 
-            history, elapsed = run_simulation(
-                environment=environment,
-                departments=departments,
-                coordination=mechanism,
-                max_steps=max_steps,
-                seed=seed,
-            )
+                history, elapsed = run_simulation(
+                    environment=environment,
+                    departments=departments,
+                    coordination=mechanism,
+                    max_steps=max_steps,
+                    seed=seed,
+                )
 
-            mechanism_histories.append(history)
+                mechanism_histories.append(history)
 
-            run_metrics = compute_metrics(
-                history=history,
-                departments=departments,
-                max_steps=max_steps,
-                wall_time_seconds=elapsed,
-                seed=seed,
-            )
+                run_metrics = compute_metrics(
+                    history=history,
+                    departments=departments,
+                    max_steps=max_steps,
+                    wall_time_seconds=elapsed,
+                    seed=seed,
+                )
+                run_metrics["composition"] = composition_name
+                all_metrics.append(run_metrics)
 
-            all_metrics.append(run_metrics)
-
-        all_histories[mechanism.name] = mechanism_histories
+            key = f"{composition_name}/{mechanism.name}"
+            all_histories[key] = mechanism_histories
 
     # --- Detailed CSV: one row per (mechanism, seed) ---
 
@@ -107,18 +137,28 @@ def main():
     numeric_cols = [
         "final_reserve", "average_reserve", "steps_survived",
         "total_withdrawal", "average_reward", "reward_inequality_gini",
-        "total_messages", "total_rounds", "wall_time_seconds",
+        "total_messages", "total_rounds", "wall_time_seconds", "debate_override_rate",
     ]
 
+    llm_cols = ["llm_calls", "llm_total_latency_ms", "llm_avg_latency_ms"]
+
     aggregated_rows = []
-    for mechanism in coordination_mechanisms:
-        mech_df = detailed_df[detailed_df["mechanism"] == mechanism.name]
-        row = {"mechanism": mechanism.name}
-        for col in numeric_cols:
-            row[f"{col}_mean"] = mech_df[col].mean()
-            row[f"{col}_std"] = mech_df[col].std()
-        row["crisis_rate"] = mech_df["liquidity_crisis"].mean()
-        aggregated_rows.append(row)
+    for composition_name in compositions:
+        for mechanism in coordination_mechanisms:
+            mech_df = detailed_df[
+                (detailed_df["mechanism"] == mechanism.name) &
+                (detailed_df["composition"] == composition_name)
+            ]
+            row = {"mechanism": mechanism.name, "composition": composition_name}
+            for col in numeric_cols:
+                if col in mech_df.columns:
+                    row[f"{col}_mean"] = mech_df[col].mean()
+                    row[f"{col}_std"] = mech_df[col].std()
+            row["crisis_rate"] = mech_df["liquidity_crisis"].mean()
+            for col in llm_cols:
+                if col in mech_df.columns:
+                    row[f"{col}_mean"] = mech_df[col].mean()
+            aggregated_rows.append(row)
 
     aggregated_df = pd.DataFrame(aggregated_rows)
 

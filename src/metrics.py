@@ -1,6 +1,7 @@
 # src/metrics.py
 
 import numpy as np
+from collections import Counter
 
 
 def gini(values):
@@ -52,7 +53,14 @@ def compute_metrics(history, departments, max_steps=100, wall_time_seconds=None,
     total_messages = sum(step["messages"] for step in history)
     total_rounds = sum(step["rounds"] for step in history)
 
-    return {
+    override_steps = sum(
+        1 for step in history
+        if step.get("final_actions") and step.get("proposals")
+        and Counter(step["proposals"]).most_common(1)[0][0] != step["final_actions"][0]
+    )
+    debate_override_rate = override_steps / len(history) if history else 0.0
+
+    metrics = {
         "mechanism": history[0]["mechanism"] if history else "unknown",
         "seed": seed,
         "final_reserve": final_reserve,
@@ -66,4 +74,15 @@ def compute_metrics(history, departments, max_steps=100, wall_time_seconds=None,
         "total_messages": total_messages,
         "total_rounds": total_rounds,
         "wall_time_seconds": wall_time_seconds,
+        "debate_override_rate": debate_override_rate,
     }
+    
+    llm_calls = sum(step.get("llm_calls", 0) for step in history)
+    llm_latency = sum(step.get("llm_latency_ms", 0) for step in history)
+    
+    if llm_calls > 0:
+        metrics["llm_calls"] = llm_calls
+        metrics["llm_total_latency_ms"] = llm_latency
+        metrics["llm_avg_latency_ms"] = llm_latency / llm_calls
+    
+    return metrics

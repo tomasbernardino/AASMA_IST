@@ -47,6 +47,8 @@ def run_simulation(environment, departments, coordination, max_steps=100, seed=N
             reserve_level=reserve,
             departments=departments,
         )
+        
+        justifications = coordination_cost.get("justifications")
 
         # Convert policies into actual withdrawal values.
         withdrawals = [
@@ -68,7 +70,7 @@ def run_simulation(environment, departments, coordination, max_steps=100, seed=N
             rewards.append(reward)
 
         # Store everything important for analysis
-        history.append({
+        step_record = {
             "t": t,
             "reserve": reserve,
             "new_reserve": new_reserve,
@@ -81,7 +83,15 @@ def run_simulation(environment, departments, coordination, max_steps=100, seed=N
             "messages": coordination_cost["messages"],
             "rounds": coordination_cost["rounds"],
             "mechanism": coordination.name,
-        })
+            "justifications": justifications,
+        }
+        
+        if "llm_calls" in coordination_cost:
+            step_record["llm_calls"] = coordination_cost.get("llm_calls", 0)
+            step_record["llm_latency_ms"] = coordination_cost.get("llm_latency_ms", 0)
+            step_record["rationale"] = coordination_cost.get("rationale", "")
+        
+        history.append(step_record)
 
         # Move to next state
         reserve = new_reserve

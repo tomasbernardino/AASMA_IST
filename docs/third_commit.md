@@ -66,14 +66,14 @@ Four role-specific system prompts are defined, matching the baseline roles:
 
 ## How to Run
 
-Set your OpenAI API key and run:
+Set your OpenRouter API key and run:
 
-    export OPENAI_API_KEY="sk-..."
+    export OPENROUTER_API_KEY="sk-..."
     python main_llm.py
 
 Or on Windows:
 
-    set OPENAI_API_KEY=sk-...
+    set OPENROUTER_API_KEY=sk-...
     py main_llm.py
 
 Results will be saved to `results/llm/`.

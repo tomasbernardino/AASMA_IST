@@ -1,3 +1,4 @@
+import os
 import re
 
 from openai import OpenAI
@@ -8,10 +9,13 @@ _client = None
 
 
 def _get_client():
-    """Return a shared OpenAI client (lazy initialization)."""
+    """Return a shared OpenAI client configured for OpenRouter (lazy initialization)."""
     global _client
     if _client is None:
-        _client = OpenAI()
+        _client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+        )
     return _client
 
 
@@ -141,7 +145,26 @@ class LLMDepartment:
         """
         Reward function (identical to rule-based Department).
         """
-        reward = withdrawal
+        if self.role == "profit":
+            reward = withdrawal
+        elif self.role == "sustainability":
+            crisis_risk = 1.0 if reserve_level < 20 else 0.0
+            alpha = 5.0
+            reward = withdrawal - alpha * crisis_risk
+        elif self.role == "balanced":
+            reserve_deficit = max(0, 50 - reserve_level) / 50
+            beta = 3.0
+            reward = withdrawal - beta * reserve_deficit
+        elif self.role == "risk_averse":
+            if len(self._recent_history) > 0:
+                prev_reserve = self._recent_history[-1]["reserve"]
+                volatility = abs(reserve_level - prev_reserve) / 100.0
+            else:
+                volatility = 0.0
+            gamma = 2.0
+            reward = withdrawal - gamma * volatility
+        else:
+            reward = withdrawal
 
         if crisis:
             reward -= 5.0
