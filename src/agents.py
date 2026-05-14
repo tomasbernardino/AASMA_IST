@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+import numpy as np
+
 
 @dataclass
 class AgentState:
@@ -19,22 +21,33 @@ class Department:
         - agent state for memory and utility computation
     """
 
-    def __init__(self, name, role, reserve_capacity=100):
+    def __init__(self, name, role, reserve_capacity=100, exploration_rate=0.0):
         self.name = name
         self.role = role
         self.reserve_capacity = reserve_capacity
+        self.exploration_rate = exploration_rate
         self.total_reward = 0.0
         self.state = AgentState()
+        self.rng = np.random.default_rng()
 
-    def reset(self):
+    def reset(self, seed=None):
         """Reset accumulated reward and state before a new simulation."""
         self.total_reward = 0.0
         self.state = AgentState()
+        if seed is not None:
+            self.rng = np.random.default_rng(seed)
 
     def propose_action(self, reserve_level):
         """
         Return the withdrawal policy proposed by the department.
+
+        With probability `exploration_rate`, the agent ignores its
+        deterministic policy and picks a uniformly random action.
+        This prevents lock-in and adds bounded rationality.
         """
+        if self.exploration_rate > 0 and self.rng.random() < self.exploration_rate:
+            return self.rng.choice(["L", "M", "H"])
+
         if self.role == "profit":
             return self._growth_policy(reserve_level)
 
@@ -47,14 +60,31 @@ class Department:
         if self.role == "risk_averse":
             return self._risk_policy(reserve_level)
 
+    # Per-role risk perception thresholds.
+    # Format: (high_risk_below, medium_risk_below)
+    _RISK_THRESHOLDS = {
+        "profit":         (10, 25),   # high tolerance — only panics at very low reserves
+        "sustainability": (30, 60),   # perceives danger earlier
+        "balanced":       (20, 40),   # moderate (same as original global thresholds)
+        "risk_averse":    (40, 70),   # most cautious — sees risk when others don't
+    }
+
     def get_estimated_risk(self, reserve_level):
         """
         Estimate crisis risk for debate mechanism.
+
         Returns: 1.0 (high), 0.5 (medium), 0.0 (low)
+
+        The thresholds depend on the department's role: profit-oriented
+        departments tolerate lower reserves before signalling danger,
+        while risk-averse departments raise the alarm much earlier.
         """
-        if reserve_level < 20:
+        high_thresh, med_thresh = self._RISK_THRESHOLDS.get(
+            self.role, (20, 40)
+        )
+        if reserve_level < high_thresh:
             return 1.0
-        elif reserve_level < 40:
+        elif reserve_level < med_thresh:
             return 0.5
         return 0.0
 

@@ -29,8 +29,9 @@ def run_simulation(environment, departments, coordination, max_steps=100, seed=N
     # Reset environment and departments.
     reserve = environment.reset()
 
-    for department in departments:
-        department.reset()
+    for i, department in enumerate(departments):
+        dept_seed = (seed + i + 1) if seed is not None else None
+        department.reset(seed=dept_seed)
 
     history = []
 
@@ -79,6 +80,7 @@ def run_simulation(environment, departments, coordination, max_steps=100, seed=N
             "withdrawals": withdrawals,
             "total_withdrawal": sum(withdrawals),
             "rewards": rewards,
+            "department_names": [d.name for d in departments],
             "crisis": crisis,
             "messages": coordination_cost["messages"],
             "rounds": coordination_cost["rounds"],

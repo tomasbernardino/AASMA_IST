@@ -18,39 +18,41 @@ from src.plotting import (
     plot_liquidity_confidence_bands,
     plot_metrics_comparison,
     plot_action_distributions,
+    plot_reserve_by_composition,
+    plot_metrics_by_composition,
 )
 
 
 def create_departments():
     """Standard composition: 2 profit + 1 sustainability + 1 balanced + 1 risk_averse."""
     return [
-        Department("Growth Department", "profit", reserve_capacity=100),
-        Department("Trading/Opportunity Team", "profit", reserve_capacity=100),
-        Department("Compliance Department", "sustainability", reserve_capacity=100),
-        Department("Operations Department", "balanced", reserve_capacity=100),
-        Department("Risk Department", "risk_averse", reserve_capacity=100),
+        Department("Growth Department", "profit", reserve_capacity=100, exploration_rate=0.1),
+        Department("Trading/Opportunity Team", "profit", reserve_capacity=100, exploration_rate=0.1),
+        Department("Compliance Department", "sustainability", reserve_capacity=100, exploration_rate=0.1),
+        Department("Operations Department", "balanced", reserve_capacity=100, exploration_rate=0.1),
+        Department("Risk Department", "risk_averse", reserve_capacity=100, exploration_rate=0.1),
     ]
 
 
 def create_departments_aggressive():
     """Aggressive composition: 3 profit + 1 balanced + 1 risk_averse."""
     return [
-        Department("Growth Department", "profit", reserve_capacity=100),
-        Department("Trading/Opportunity Team", "profit", reserve_capacity=100),
-        Department("Investment Department", "profit", reserve_capacity=100),
-        Department("Operations Department", "balanced", reserve_capacity=100),
-        Department("Risk Department", "risk_averse", reserve_capacity=100),
+        Department("Growth Department", "profit", reserve_capacity=100, exploration_rate=0.1),
+        Department("Trading/Opportunity Team", "profit", reserve_capacity=100, exploration_rate=0.1),
+        Department("Investment Department", "profit", reserve_capacity=100, exploration_rate=0.1),
+        Department("Operations Department", "balanced", reserve_capacity=100, exploration_rate=0.1),
+        Department("Risk Department", "risk_averse", reserve_capacity=100, exploration_rate=0.1),
     ]
 
 
 def create_departments_conservative():
     """Conservative composition: 1 profit + 2 sustainability + 1 balanced + 1 risk_averse."""
     return [
-        Department("Growth Department", "profit", reserve_capacity=100),
-        Department("Compliance Department", "sustainability", reserve_capacity=100),
-        Department("ESG Department", "sustainability", reserve_capacity=100),
-        Department("Operations Department", "balanced", reserve_capacity=100),
-        Department("Risk Department", "risk_averse", reserve_capacity=100),
+        Department("Growth Department", "profit", reserve_capacity=100, exploration_rate=0.1),
+        Department("Compliance Department", "sustainability", reserve_capacity=100, exploration_rate=0.1),
+        Department("ESG Department", "sustainability", reserve_capacity=100, exploration_rate=0.1),
+        Department("Operations Department", "balanced", reserve_capacity=100, exploration_rate=0.1),
+        Department("Risk Department", "risk_averse", reserve_capacity=100, exploration_rate=0.1),
     ]
 
 
@@ -136,7 +138,8 @@ def main():
 
     numeric_cols = [
         "final_reserve", "average_reserve", "steps_survived",
-        "total_withdrawal", "average_reward", "reward_inequality_gini",
+        "total_withdrawal", "average_reward", "social_welfare",
+        "reward_inequality_gini",
         "total_messages", "total_rounds", "wall_time_seconds", "debate_override_rate",
     ]
 
@@ -183,6 +186,17 @@ def main():
     plot_action_distributions(
         all_histories_by_mechanism=all_histories,
         output_path="results/figures/action_distributions.png",
+    )
+
+    plot_reserve_by_composition(
+        all_histories_by_mechanism=all_histories,
+        max_steps=max_steps,
+        output_path="results/figures/reserve_by_composition.png",
+    )
+
+    plot_metrics_by_composition(
+        aggregated_df=aggregated_df,
+        output_path="results/figures/metrics_by_composition.png",
     )
 
 

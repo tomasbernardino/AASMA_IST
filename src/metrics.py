@@ -56,7 +56,7 @@ def compute_metrics(history, departments, max_steps=100, wall_time_seconds=None,
     override_steps = sum(
         1 for step in history
         if step.get("final_actions") and step.get("proposals")
-        and Counter(step["proposals"]).most_common(1)[0][0] != step["final_actions"][0]
+        and any(p != f for p, f in zip(step["proposals"], step["final_actions"]))
     )
     debate_override_rate = override_steps / len(history) if history else 0.0
 
@@ -70,11 +70,15 @@ def compute_metrics(history, departments, max_steps=100, wall_time_seconds=None,
         "steps_survived": len(history),
         "total_withdrawal": sum(total_withdrawals),
         "average_reward": float(np.mean(total_reward_per_department)),
+        "social_welfare": float(np.sum(total_reward_per_department)),
         "reward_inequality_gini": gini(total_reward_per_department),
         "total_messages": total_messages,
         "total_rounds": total_rounds,
         "wall_time_seconds": wall_time_seconds,
         "debate_override_rate": debate_override_rate,
+        "reward_per_department": {
+            dept.name: dept.total_reward for dept in departments
+        },
     }
     
     llm_calls = sum(step.get("llm_calls", 0) for step in history)
