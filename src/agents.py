@@ -60,6 +60,9 @@ class Department:
         if self.role == "risk_averse":
             return self._risk_policy(reserve_level)
 
+        if self.role == "free_rider":
+            return self._free_rider_policy(reserve_level)
+
     # Per-role risk perception thresholds.
     # Format: (high_risk_below, medium_risk_below)
     _RISK_THRESHOLDS = {
@@ -67,6 +70,7 @@ class Department:
         "sustainability": (30, 60),   # perceives danger earlier
         "balanced":       (20, 40),   # moderate (same as original global thresholds)
         "risk_averse":    (40, 70),   # most cautious — sees risk when others don't
+        "free_rider":     (0, 0),     # never sees risk
     }
 
     def get_estimated_risk(self, reserve_level):
@@ -98,6 +102,8 @@ class Department:
             return "liquidity_protection"
         elif self.role == "risk_averse":
             return "crisis_avoidance"
+        elif self.role == "free_rider":
+            return "exploitation"
         else:
             return "balancing"
 
@@ -139,6 +145,9 @@ class Department:
                 volatility = 0.0
             gamma = 2.0
             reward = withdrawal - gamma * volatility
+
+        elif self.role == "free_rider":
+            reward = withdrawal * 1.5
 
         else:
             reward = withdrawal
@@ -185,3 +194,9 @@ class Department:
         if reserve_level < 90:
             return "L"
         return "M"
+
+    def _free_rider_policy(self, reserve_level):
+        """
+        Free rider ignores reserve level and always takes H.
+        """
+        return "H"

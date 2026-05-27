@@ -27,7 +27,34 @@ ROLE_PROMPTS = {
         "You almost always prefer low withdrawals unless the reserve is at "
         "near-full capacity."
     ),
+    "free_rider": (
+        "You are an extremely aggressive free-rider. You do NOT care about the "
+        "common reserve. Your ONLY goal is to extract maximum value for your "
+        "department. You believe others will be conservative enough to "
+        "compensate for your aggression. You ALWAYS prefer high withdrawals."
+    ),
 }
+
+def build_universalization_prompt(reserve_level: float, n_departments: int, reserve_capacity: float = 100.0) -> str:
+    """Inject Kantian universalization reasoning based on GovSim paper."""
+    # Rough estimate of recovery: 30% of current level * capacity factor
+    recovery = 0.3 * reserve_level * (1 - reserve_level / reserve_capacity)
+    sustainable_total = recovery
+    sustainable_per_dept = sustainable_total / n_departments
+    
+    if sustainable_per_dept <= 1.5:
+        level = "L"
+    elif sustainable_per_dept <= 2.5:
+        level = "M"
+    else:
+        level = "H"
+        
+    return (
+        f"Consider the universal impact: if ALL {n_departments} departments chose level '{level}' "
+        f"or lower, the reserve would remain stable or grow. "
+        f"If everyone chose a higher level, the reserve would shrink. "
+        f"Think about what would happen if every department acted as you plan to."
+    )
 
 
 def build_centralized_leader_prompt(

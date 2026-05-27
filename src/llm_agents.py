@@ -11,7 +11,7 @@ class LLMDepartment:
     """
 
     def __init__(self, name, role, model=None, temperature=0.3,
-                 memory_window=5):
+                 memory_window=5, universalization=False, n_departments=5):
         self.name = name
         self.role = role
         self.model = model or get_llm_model()
@@ -21,6 +21,8 @@ class LLMDepartment:
         self.last_llm_calls = 0
         self.last_llm_latency_ms = 0.0
         self.last_llm_model = ""
+        self.universalization = universalization
+        self.n_departments = n_departments
         self._recent_history = []
 
     def reset(self, seed=None):
@@ -37,6 +39,7 @@ class LLMDepartment:
         "sustainability": (30, 60),
         "balanced": (20, 40),
         "risk_averse": (40, 70),
+        "free_rider": (0, 0),  # never perceives risk
     }
 
     def get_estimated_risk(self, reserve_level):
@@ -56,6 +59,8 @@ class LLMDepartment:
             return "liquidity_protection"
         if self.role == "risk_averse":
             return "crisis_avoidance"
+        if self.role == "free_rider":
+            return "exploitation"
         return "balancing"
 
     def justify_action(self, proposed_action, reserve_level):
@@ -68,7 +73,7 @@ class LLMDepartment:
             "role": self.role,
         }
 
-    def propose_action(self, reserve_level):
+    def propose_action(self, reserve_level, context=""):
         """Falls back to "M" on API errors so a transient provider failure
         doesn't abort the simulation."""
         self.last_llm_calls = 1
@@ -88,10 +93,17 @@ class LLMDepartment:
                 )
             history_text = "\nYour recent history:\n" + "\n".join(lines)
 
+        univ_text = ""
+        if self.universalization:
+            from src.prompts import build_universalization_prompt
+            univ_text = "\n\n" + build_universalization_prompt(reserve_level, self.n_departments)
+
+        context_text = f"\n\nContext from coordination:\n{context}" if context else ""
+
         user_prompt = (
             f"The shared liquidity reserve is currently at {reserve_level:.1f} "
             f"out of 100 maximum. The crisis threshold is 5."
-            f"{history_text}\n\n"
+            f"{history_text}{univ_text}{context_text}\n\n"
             f"Choose your withdrawal level for this step.\n"
             f"Reply with exactly one letter: L (low=1), M (medium=2), or H (high=3).\n"
             f"Do not include any other text."
@@ -119,6 +131,36 @@ class LLMDepartment:
         self.last_llm_latency_ms = response.latency_ms
         return parse_action(response)
 
+    def chat(self, reserve_level, transcript):
+        """Generates a short chat message during free negotiation."""
+        self.last_llm_calls += 1
+        self.last_llm_model = self.model
+
+        system_prompt = ROLE_PROMPTS.get(self.role, ROLE_PROMPTS["balanced"])
+        
+        user_prompt = (
+            f"The shared liquidity reserve is currently at {reserve_level:.1f} / 100.\n"
+            f"We are in a free negotiation phase before choosing withdrawal levels.\n\n"
+            f"Current conversation transcript:\n{transcript if transcript else '(No messages yet)'}\n\n"
+            f"Write a short, 1-2 sentence message to the other departments. "
+            f"Advocate for your department's goals or respond to others."
+        )
+
+        try:
+            response = call_openrouter(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=150,
+            )
+            self.last_llm_latency_ms += response.latency_ms
+            return response.content.strip()
+        except Exception:
+            return "(silence)"
+
     def receive_reward(self, withdrawal, reserve_level, crisis):
         """Reward function (identical to rule-based Department)."""
         if self.role == "profit":
@@ -139,6 +181,8 @@ class LLMDepartment:
                 volatility = 0.0
             gamma = 2.0
             reward = withdrawal - gamma * volatility
+        elif self.role == "free_rider":
+            reward = withdrawal * 1.5  # higher reward for extracting value
         else:
             reward = withdrawal
 

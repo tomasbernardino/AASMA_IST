@@ -361,3 +361,58 @@ class LLMCentralizedCoordination(CoordinationMechanism):
 
         return final_actions, cost
 
+
+class FreeNegotiationCoordination(CoordinationMechanism):
+    """
+    GovSim-style free negotiation.
+    
+    Ignores initial proposals. Instead, runs a chat round where each
+    department speaks in turn. Afterwards, each department decides its
+    final action in light of the transcript.
+    """
+    name = "free_negotiation"
+
+    def __init__(self, chat_rounds=1):
+        self.chat_rounds = chat_rounds
+
+    def decide(self, proposals, reserve_level=None, departments=None):
+        if reserve_level is None:
+            raise ValueError("FreeNegotiationCoordination requires reserve_level.")
+        if departments is None:
+            raise ValueError("FreeNegotiationCoordination requires departments.")
+
+        transcript = ""
+        llm_latency = 0.0
+
+        # Phase 1: Free Discussion
+        for r in range(self.chat_rounds):
+            for dept in departments:
+                # Rule-based agents don't have chat() implemented, so we check.
+                if hasattr(dept, "chat"):
+                    msg = dept.chat(reserve_level, transcript)
+                    transcript += f"{dept.name} ({dept.role}): {msg}\n"
+                    llm_latency += getattr(dept, "last_llm_latency_ms", 0.0)
+                else:
+                    transcript += f"{dept.name} ({dept.role}): (Cannot chat, rule-based)\n"
+
+        # Phase 2: Action Proposal based on transcript
+        final_actions = []
+        for dept in departments:
+            if hasattr(dept, "propose_action") and 'context' in dept.propose_action.__code__.co_varnames:
+                action = dept.propose_action(reserve_level, context=transcript)
+                llm_latency += getattr(dept, "last_llm_latency_ms", 0.0)
+            else:
+                action = dept.propose_action(reserve_level)
+            final_actions.append(action)
+
+        cost = {
+            "messages": len(departments) * self.chat_rounds + len(departments),
+            "rounds": self.chat_rounds + 1,
+            "llm_calls": len(departments) * self.chat_rounds,
+            "llm_latency_ms": llm_latency,
+            "rationale": transcript,
+            "model": getattr(departments[0], "model", "rule-based"),
+        }
+
+        return final_actions, cost
+

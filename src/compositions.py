@@ -30,6 +30,13 @@ COMPOSITION_SPECS = {
         ("Operations Department", "balanced"),
         ("Risk Department", "risk_averse"),
     ],
+    "free_rider": [
+        ("Growth Department", "profit"),
+        ("Trading/Opportunity Team", "profit"),
+        ("Compliance Department", "sustainability"),
+        ("Operations Department", "balanced"),
+        ("Saboteur Department", "free_rider"),
+    ],
 }
 
 
