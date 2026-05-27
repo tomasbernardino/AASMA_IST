@@ -1,15 +1,4 @@
-"""
-src/crewai_coordination.py
-
-CrewAI-based debate coordination mechanism.
-
-Each department is mapped to a CrewAI Agent with a role, goal, and backstory
-derived from the existing prompts.py role descriptions. A Moderator agent
-synthesizes all arguments and returns the final group action (L, M, or H).
-
-Process: Sequential
-  - Each department agent produces a proposal + justification.
-  - The moderator agent reads all outputs and decides the final action.
+"""CrewAI-based debate coordination.
 
 This is intentionally the ONLY mechanism that uses CrewAI, because debate
 is the only mechanism that genuinely has N interacting agents with distinct
@@ -17,53 +6,41 @@ roles — exactly what CrewAI was designed to orchestrate.
 """
 
 import os
-import re
 import time
 
+from dotenv import load_dotenv
+
+from src.llm_client import get_llm_model
 from src.coordination import CoordinationMechanism
-from src.prompts import DEPARTMENT_ROLE_PROMPTS
+from src.prompts import ROLE_PROMPTS
 
 
-# ---------------------------------------------------------------------------
-# Role metadata for CrewAI agent construction
-# ---------------------------------------------------------------------------
+load_dotenv()
 
+
+# `backstory` is shared with LLMDepartment via ROLE_PROMPTS so the persona
+# wording stays in sync across mechanisms. `role` and `goal` stay local
+# because CrewAI's Agent constructor takes them as separate fields.
 ROLE_METADATA = {
     "profit": {
         "role": "Growth & Trading Department Head",
         "goal": "Maximize the department's withdrawal to fund aggressive investment and growth.",
-        "backstory": (
-            "You lead the Growth and Trading departments. Your mandate is to maximize "
-            "returns and capture opportunities. You push for high capital deployment "
-            "when liquidity allows, and only back down when crisis is truly imminent."
-        ),
+        "backstory": ROLE_PROMPTS["profit"],
     },
     "sustainability": {
         "role": "Compliance Department Head",
         "goal": "Protect the liquidity reserve and ensure the organization's long-term survival.",
-        "backstory": (
-            "You lead the Compliance department. Your mandate is to safeguard the "
-            "shared reserve. You advocate for conservative withdrawals and raise the "
-            "alarm when the reserve approaches dangerous levels."
-        ),
+        "backstory": ROLE_PROMPTS["sustainability"],
     },
     "balanced": {
         "role": "Operations Department Head",
         "goal": "Balance operational funding needs with reserve health.",
-        "backstory": (
-            "You lead Operations. You need steady funding but understand that the "
-            "reserve must remain healthy. You adapt your ask to the current state "
-            "of the reserve: more when liquidity is high, less when it is low."
-        ),
+        "backstory": ROLE_PROMPTS["balanced"],
     },
     "risk_averse": {
         "role": "Risk Department Head",
         "goal": "Prevent a liquidity crisis at all costs.",
-        "backstory": (
-            "You lead the Risk department. Your primary objective is crisis avoidance. "
-            "You almost always advocate for low withdrawals unless the reserve is at "
-            "near-full capacity. A liquidity crisis is unacceptable on your watch."
-        ),
+        "backstory": ROLE_PROMPTS["risk_averse"],
     },
 }
 
@@ -83,40 +60,80 @@ MODERATOR_METADATA = {
 
 
 class CrewAIDebateCoordination(CoordinationMechanism):
-    """
-    CrewAI-based debate coordination.
-
-    Each department is modelled as a CrewAI Agent. A sequential Crew runs:
-      1. Each department agent produces a short argument defending its proposal.
-      2. A moderator agent reads all arguments and outputs the final action.
-
-    Returns the same interface as all other CoordinationMechanism subclasses:
-      final_actions (list), cost (dict)
-
-    Requires:
-      - crewai package installed  (pip install crewai)
-      - OPENROUTER_API_KEY environment variable set
-      - Or set OPENAI_API_KEY if using OpenAI directly
-    """
+    """Two-round department debate adjudicated by a moderator agent. Each
+    department is one CrewAI Agent; the moderator allocates a per-department
+    action from the synthesised arguments."""
 
     name = "crewai_debate"
 
     def __init__(
         self,
-        model: str = "openai/gpt-4o-mini",
+        model: str | None = None,
         temperature: float = 0.3,
+        memory_window: int = 5,
+        allow_delegation: bool = True,
     ):
-        self.model = model
+        self.model = model or get_llm_model()
         self.temperature = temperature
+        self.memory_window = memory_window
+        self.allow_delegation = allow_delegation
+        self._llm = None
+        self._memory_log = []
+        self._step_counter = 0
 
-    def _build_llm(self):
-        """Build a CrewAI-compatible LLM object pointing at OpenRouter."""
-        from crewai import LLM
-        return LLM(
-            model=self.model,
-            api_key=os.getenv("OPENROUTER_API_KEY"),
-            base_url="https://openrouter.ai/api/v1",
-            temperature=self.temperature,
+    def reset(self):
+        self._memory_log = []
+        self._step_counter = 0
+
+    def _get_llm(self):
+        if self._llm is None:
+            from crewai import LLM
+
+            api_key = os.getenv("OPENROUTER_API_KEY")
+            if not api_key:
+                raise ValueError("CrewAIDebateCoordination requires OPENROUTER_API_KEY.")
+
+            crewai_model = (
+                self.model
+                if self.model.startswith("openrouter/")
+                else f"openrouter/{self.model}"
+            )
+            self._llm = LLM(
+                model=crewai_model,
+                api_key=api_key,
+                base_url="https://openrouter.ai/api/v1",
+                temperature=self.temperature,
+                timeout=45,
+                max_retries=0,
+            )
+        return self._llm
+
+    def _build_memory_context(self):
+        """Textual summary of recent debate outcomes. Without this, agents
+        treat every step in isolation and can't track whether the reserve
+        is drifting toward crisis."""
+        if not self._memory_log:
+            return ""
+        recent = self._memory_log[-self.memory_window:]
+        lines = []
+        for entry in recent:
+            actions = ",".join(entry["actions"])
+            after = (
+                f"{entry['reserve_after']:.1f}"
+                if entry["reserve_after"] is not None
+                else "?"
+            )
+            lines.append(
+                f"  Step {entry['step']}: reserve {entry['reserve_before']:.1f} -> "
+                f"{after}, decided actions=[{actions}]"
+            )
+        return (
+            "Recent debate history (last "
+            f"{len(recent)} steps, oldest first):\n"
+            + "\n".join(lines)
+            + "\n\nFactor this trajectory into your reasoning: do recent "
+            "decisions appear to be working, or is the reserve drifting "
+            "toward crisis?\n\n"
         )
 
     def decide(self, proposals, reserve_level=None, departments=None):
@@ -128,11 +145,18 @@ class CrewAIDebateCoordination(CoordinationMechanism):
         from crewai import Agent, Task, Crew, Process
 
         start_time = time.perf_counter()
-        llm = self._build_llm()
+        llm = self._get_llm()
 
-        # ------------------------------------------------------------------
-        # 1. Build one CrewAI Agent per department
-        # ------------------------------------------------------------------
+        # Backfill: previous step's outcome is only observable now.
+        if self._memory_log:
+            self._memory_log[-1]["reserve_after"] = reserve_level
+
+        memory_blurb = self._build_memory_context()
+
+        # `allow_delegation=True` lets agents query each other mid-debate
+        # (e.g. Growth asking Risk for a volatility threshold). Each
+        # delegation is an extra untracked LLM call, so cost.llm_calls
+        # becomes a lower bound.
         dept_agents = []
         for dept in departments:
             meta = ROLE_METADATA.get(dept.role, ROLE_METADATA["balanced"])
@@ -141,117 +165,169 @@ class CrewAIDebateCoordination(CoordinationMechanism):
                 goal=meta["goal"],
                 backstory=meta["backstory"],
                 llm=llm,
+                memory=False,
+                max_iter=3,
                 verbose=False,
-                allow_delegation=False,
+                allow_delegation=self.allow_delegation,
             )
             dept_agents.append(agent)
 
-        # ------------------------------------------------------------------
-        # 2. Build the Moderator Agent
-        # ------------------------------------------------------------------
         moderator_agent = Agent(
             role=MODERATOR_METADATA["role"],
             goal=MODERATOR_METADATA["goal"],
             backstory=MODERATOR_METADATA["backstory"],
             llm=llm,
+            memory=False,
+            max_iter=3,
             verbose=False,
-            allow_delegation=False,
+            allow_delegation=self.allow_delegation,
         )
 
-        # ------------------------------------------------------------------
-        # 3. Build one Task per department agent
-        # ------------------------------------------------------------------
         reserve_pct = reserve_level / 100.0
-        crisis_proximity = "CRITICAL" if reserve_level < 20 else \
-                           "DANGEROUS" if reserve_level < 40 else \
-                           "MODERATE" if reserve_level < 70 else "SAFE"
+        crisis_proximity = (
+            "CRITICAL" if reserve_level < 20 else
+            "DANGEROUS" if reserve_level < 40 else
+            "MODERATE" if reserve_level < 70 else "SAFE"
+        )
+        crew_inputs = {
+            "memory_context": memory_blurb,
+            "reserve_level": f"{reserve_level:.1f}",
+            "reserve_percent": f"{reserve_pct * 100:.0f}",
+            "crisis_proximity": crisis_proximity,
+            "crisis_threshold": "5",
+            "department_count": str(len(departments)),
+        }
 
-        dept_tasks = []
+        # ------------------------------------------------------------------
+        # 2. ROUND 1 — Opening arguments (independent, parallel in spirit)
+        # ------------------------------------------------------------------
+        opening_tasks = []
         for dept, agent, proposal in zip(departments, dept_agents, proposals):
             task = Task(
                 description=(
-                    f"The shared liquidity reserve is currently at {reserve_level:.1f}/100 "
-                    f"({reserve_pct*100:.0f}%). Status: {crisis_proximity}.\n\n"
-                    f"Your department's ({dept.name}) rule-based policy proposes: {proposal}.\n\n"
-                    f"In 2-3 sentences, argue WHY this withdrawal level ({proposal}) is the right "
-                    f"choice for the organization given the current reserve state. "
-                    f"Be specific about the risk level and your department's rationale."
+                    "{memory_context}"
+                    f"OPENING ARGUMENT (round 1 of 2).\n"
+                    "Reserve: {reserve_level}/100 ({reserve_percent}%). "
+                    "Status: {crisis_proximity}.\n\n"
+                    f"Your department ({dept.name}) proposes withdrawal level {proposal}.\n\n"
+                    f"In 2-3 sentences, argue WHY {proposal} is the right choice for the "
+                    f"organization given the current reserve state. Be specific about the "
+                    f"risk and your department's mandate.\n\n"
+                    f"For opening arguments, just state your position — do NOT delegate or "
+                    f"consult other departments. They will hear you in due course."
                 ),
                 expected_output=(
-                    f"A short argument (2-3 sentences) from the {dept.name} supporting "
-                    f"withdrawal level {proposal}, with risk reasoning."
+                    f"A 2-3 sentence opening argument from {dept.name} defending {proposal}."
                 ),
                 agent=agent,
             )
-            dept_tasks.append(task)
+            opening_tasks.append(task)
 
-        # ------------------------------------------------------------------
-        # 4. Build the Moderator Task (depends on all dept tasks)
-        # ------------------------------------------------------------------
+        # Round 2 — rebuttals see round-1 context; this is what makes it a
+        # debate rather than parallel elicitation.
+        rebuttal_tasks = []
+        for dept, agent, proposal in zip(departments, dept_agents, proposals):
+            task = Task(
+                description=(
+                    f"REBUTTAL (round 2 of 2).\n"
+                    "You have now heard the opening arguments from all {department_count} "
+                    f"departments (provided as context).\n\n"
+                    f"Your department ({dept.name}) opened with withdrawal level {proposal}.\n\n"
+                    f"BEFORE writing your rebuttal, you MAY consult ONE specific department "
+                    f"by delegating a single clarifying question to them (e.g. ask Risk "
+                    f"Department Head what volatility threshold they consider unacceptable). "
+                    f"Use this sparingly — only if the answer would actually change your "
+                    f"position. Do not delegate just to fill space.\n\n"
+                    f"Then, in 2-3 sentences: (a) acknowledge the strongest counter-argument "
+                    f"you heard, and (b) either defend {proposal} or update to a different "
+                    f"level (L, M, or H). End your response with one of the literal tokens "
+                    f"FINAL=L, FINAL=M, or FINAL=H on its own line."
+                ),
+                expected_output=(
+                    f"A 2-3 sentence rebuttal from {dept.name}, ending with "
+                    f"FINAL=L, FINAL=M, or FINAL=H."
+                ),
+                agent=agent,
+                context=opening_tasks,
+            )
+            rebuttal_tasks.append(task)
+
         dept_summary = "\n".join(
-            f"- {dept.name} ({dept.role}): proposes {proposal}"
+            f"- {dept.name} ({dept.role}): originally proposed {proposal}"
             for dept, proposal in zip(departments, proposals)
         )
         dept_names = [dept.name for dept in departments]
-        names_json = ", ".join(f'"{n}": "L or M or H"' for n in dept_names)
+        json_lines = ",\n  ".join(f'"{n}": "L or M or H"' for n in dept_names)
+        json_template = "{{\n  " + json_lines + ',\n  "reason": "one sentence"\n}}'
 
         moderator_task = Task(
             description=(
-                f"You have just heard arguments from all {len(departments)} departments.\n\n"
-                f"Summary of proposals:\n{dept_summary}\n\n"
-                f"Reserve level: {reserve_level:.1f}/100. Crisis threshold: 5.\n\n"
-                f"Read all preceding arguments and allocate a withdrawal level to EACH department "
-                f"individually. You may give different departments different levels.\n"
-                f"Output ONLY valid JSON in this exact format:\n"
-                f"{{{{{names_json}, \"reason\": \"one sentence\"}}}}"
+                "{memory_context}"
+                "You have observed two full rounds of debate among "
+                "{department_count} departments (opening arguments + rebuttals, "
+                f"provided as context).\n\n"
+                f"Original proposals:\n{dept_summary}\n\n"
+                "Reserve level: {reserve_level}/100. "
+                "Crisis threshold: {crisis_threshold}.\n\n"
+                f"You MAY delegate a single clarifying question to one specific department "
+                f"if a critical point is still unclear from their arguments. Use sparingly.\n\n"
+                f"Then synthesise the arguments and rebuttals and allocate a final "
+                f"withdrawal level to EACH department individually. You may give "
+                f"different departments different levels.\n\n"
+                f"Output ONLY valid JSON in exactly this shape:\n"
+                f"{json_template}"
             ),
             expected_output=(
-                f"JSON with keys: {', '.join(dept_names)}, reason"
+                f"Valid JSON with keys: {', '.join(dept_names)}, reason."
             ),
             agent=moderator_agent,
-            context=dept_tasks,
+            context=opening_tasks + rebuttal_tasks,
         )
 
-        # ------------------------------------------------------------------
-        # 5. Run the Crew sequentially
-        # ------------------------------------------------------------------
         crew = Crew(
             agents=dept_agents + [moderator_agent],
-            tasks=dept_tasks + [moderator_task],
+            tasks=opening_tasks + rebuttal_tasks + [moderator_task],
             process=Process.sequential,
             verbose=False,
         )
 
-        final_action = "M"  # safe default
-        rationale = ""
-
         try:
             from src.llm_client import parse_per_dept_actions, LLMResponse
-            result = crew.kickoff()
-            raw_output = str(result)
+            result = crew.kickoff(inputs=crew_inputs)
+            raw_output = getattr(result, "raw", str(result))
 
-            # Build a fake LLMResponse so we can reuse parse_per_dept_actions
             fake_response = LLMResponse(
-                content=raw_output, model=self.model, latency_ms=0
+                content=raw_output, model=self.model, latency_ms=0,
             )
             parsed = parse_per_dept_actions(fake_response, dept_names)
             final_actions = [parsed[name] for name in dept_names]
             rationale = parsed.get("reason", raw_output[:120])
-
+            if rationale == "parse_failed":
+                rationale = f"parse_failed: {raw_output[:200]}"
         except Exception as e:
             final_actions = ["M" for _ in proposals]
-            rationale = f"crewai_error: {str(e)[:80]}"
+            rationale = f"crewai_error: {str(e)[:240]}"
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000
-        # final_actions already set per-department by parse_per_dept_actions
 
-        # N dept tasks + 1 moderator task = N+1 LLM calls
+        # `reserve_after` is backfilled on the NEXT decide() call.
+        self._memory_log.append({
+            "step": self._step_counter,
+            "reserve_before": reserve_level,
+            "reserve_after": None,
+            "actions": list(final_actions),
+        })
+        self._step_counter += 1
+
+        # llm_calls counts the scripted 2N+1 calls only; delegation sub-calls
+        # under allow_delegation=True are untracked, so this is a lower bound.
         cost = {
-            "messages": len(proposals) * 2 + 1,
-            "rounds": 2,
-            "llm_calls": len(departments) + 1,
+            "messages": 2 * len(proposals) + 1,
+            "rounds": 3,
+            "llm_calls": 2 * len(departments) + 1,
             "llm_latency_ms": elapsed_ms,
             "rationale": rationale,
+            "model": self.model,
         }
 
         return final_actions, cost

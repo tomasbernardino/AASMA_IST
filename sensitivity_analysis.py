@@ -1,0 +1,143 @@
+"""
+Environmental sensitivity sweep.
+
+Runs every rule-based coordination mechanism across a 3x3 grid of environmental
+hostility (recovery_noise_std x shock_probability), 10 seeds per cell, standard
+composition. Shows how robust each mechanism is to noisier recovery and more
+frequent liquidity shocks.
+
+Outputs:
+    results/raw/sensitivity_detailed.csv     (one row per run)
+    results/raw/sensitivity_aggregated.csv   (one row per mechanism x cell)
+    results/figures/sensitivity_heatmap.png  (one heatmap per mechanism)
+"""
+
+from pathlib import Path
+
+import pandas as pd
+
+from src.environment import LiquidityReserveEnvironment
+from src.agents import Department
+from src.coordination import (
+    IndependentCoordination,
+    VotingCoordination,
+    AdaptiveVotingCoordination,
+    CentralizedCoordination,
+    StructuredDebateCoordination,
+)
+from src.compositions import make_compositions
+from src.simulation import run_simulation
+from src.metrics import compute_metrics
+from src.plotting import plot_sensitivity_heatmap
+
+
+# Standard composition only — sensitivity is over env params, not roles.
+create_departments = make_compositions(
+    Department, reserve_capacity=100, exploration_rate=0.1,
+)["standard"]
+
+
+# 3x3 environmental hostility grid.
+RECOVERY_NOISE_LEVELS = [0.01, 0.05, 0.15]
+SHOCK_PROBABILITIES = [0.0, 0.05, 0.10]
+
+
+def build_mechanisms():
+    return [
+        IndependentCoordination(),
+        VotingCoordination(),
+        AdaptiveVotingCoordination(),
+        CentralizedCoordination(leader_index=1, name_suffix="_profit"),
+        CentralizedCoordination(leader_index=2, name_suffix="_sustainability"),
+        CentralizedCoordination(leader_index=4, name_suffix="_risk_averse"),
+        StructuredDebateCoordination(),
+    ]
+
+
+def main():
+    max_steps = 100
+    n_seeds = 10
+
+    Path("results/raw").mkdir(parents=True, exist_ok=True)
+    Path("results/figures").mkdir(parents=True, exist_ok=True)
+
+    mechanisms = build_mechanisms()
+    all_metrics = []
+
+    for noise in RECOVERY_NOISE_LEVELS:
+        for shock in SHOCK_PROBABILITIES:
+            for mechanism in mechanisms:
+                for seed in range(n_seeds):
+                    environment = LiquidityReserveEnvironment(
+                        recovery_noise_std=noise,
+                        shock_probability=shock,
+                        shock_magnitude=10.0,
+                    )
+                    departments = create_departments()
+
+                    history, elapsed = run_simulation(
+                        environment=environment,
+                        departments=departments,
+                        coordination=mechanism,
+                        max_steps=max_steps,
+                        seed=seed,
+                    )
+
+                    run_metrics = compute_metrics(
+                        history=history,
+                        departments=departments,
+                        max_steps=max_steps,
+                        wall_time_seconds=elapsed,
+                        seed=seed,
+                    )
+                    run_metrics["recovery_noise_std"] = noise
+                    run_metrics["shock_probability"] = shock
+                    run_metrics["composition"] = "standard"
+                    all_metrics.append(run_metrics)
+
+    detailed_df = pd.DataFrame(all_metrics)
+    detailed_df.to_csv("results/raw/sensitivity_detailed.csv", index=False)
+
+    # Aggregate per (mechanism, cell).
+    agg_rows = []
+    for noise in RECOVERY_NOISE_LEVELS:
+        for shock in SHOCK_PROBABILITIES:
+            for mechanism in mechanisms:
+                cell = detailed_df[
+                    (detailed_df["mechanism"] == mechanism.name) &
+                    (detailed_df["recovery_noise_std"] == noise) &
+                    (detailed_df["shock_probability"] == shock)
+                ]
+                agg_rows.append({
+                    "mechanism": mechanism.name,
+                    "recovery_noise_std": noise,
+                    "shock_probability": shock,
+                    "crisis_rate": cell["liquidity_crisis"].mean(),
+                    "average_reserve_mean": cell["average_reserve"].mean(),
+                    "average_reserve_std": cell["average_reserve"].std(),
+                    "steps_survived_mean": cell["steps_survived"].mean(),
+                    "total_withdrawal_mean": cell["total_withdrawal"].mean(),
+                    "override_rate_mean": cell["debate_override_rate"].mean(),
+                    "gini_mean": cell["reward_inequality_gini"].mean(),
+                })
+
+    aggregated_df = pd.DataFrame(agg_rows)
+    aggregated_df.to_csv("results/raw/sensitivity_aggregated.csv", index=False)
+
+    print("\n=== Sensitivity crisis_rate by mechanism x (noise, shock) ===")
+    pivot = aggregated_df.pivot_table(
+        index="mechanism",
+        columns=["recovery_noise_std", "shock_probability"],
+        values="crisis_rate",
+    )
+    print(pivot.to_string())
+
+    plot_sensitivity_heatmap(
+        aggregated_df=aggregated_df,
+        value_col="crisis_rate",
+        output_path="results/figures/sensitivity_heatmap.png",
+    )
+
+
+if __name__ == "__main__":
+    main()

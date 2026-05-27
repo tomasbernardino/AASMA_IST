@@ -1,162 +1,145 @@
-"""
-Entry point for running the simulation with LLM-based departments.
+"""LLM experiment track.
 
-This is separate from main.py so that the baseline rule-based results
-remain untouched and reproducible. Both entry points use the same
-simulation loop, environment, coordination mechanisms, and metrics.
+Each LLM mechanism is paired with its closest rule-based analog so we can
+claim "the LLM coordinator beats/ties/loses to the rule-based one":
+    CentralizedCoordination(profit|sustainability|risk_averse)
+                                 <-> LLMCentralizedCoordination
+    StructuredDebateCoordination <-> CrewAIDebateCoordination
+The three Centralized variants mirror main.py so the LLM CFO is compared
+against every leader archetype, not just one. Independent is the
+no-coordination baseline. Voting/AdaptiveVoting are excluded: no natural
+LLM analog and they'd pay LLM-department cost for no new insight.
+
+Multi-model: set LLM_MODELS=a,b,c to sweep models; each gets its own subdir
+under results/llm/ plus a combined comparison CSV + figure. Single-model
+mode (LLM_MODELS unset) writes flat to results/llm/.
 """
 
+import os
+import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
+from src.llm_client import get_llm_model
 from src.environment import LiquidityReserveEnvironment
 from src.llm_agents import LLMDepartment
 from src.coordination import (
     IndependentCoordination,
-    VotingCoordination,
     CentralizedCoordination,
-    DebateCoordination,
+    StructuredDebateCoordination,
+    LLMCentralizedCoordination,
 )
-from src.simulation import run_simulation
-from src.metrics import compute_metrics
-from src.plotting import (
-    plot_liquidity_confidence_bands,
-    plot_metrics_comparison,
-    plot_action_distributions,
-)
+from src.crewai_coordination import CrewAIDebateCoordination
+from src.compositions import make_compositions
+from src.experiment import run_experiment_sweep
+from src.plotting import plot_model_comparison
 
 
-def create_llm_departments(model="gpt-4o-mini", temperature=0.3):
-    """
-    Create LLM-based departments with the same roles as the baseline.
+MODELS = [
+    model.strip()
+    for model in os.environ.get("LLM_MODELS", get_llm_model()).split(",")
+    if model.strip()
+]
 
-    Each department uses OpenAI to decide its withdrawal policy instead
-    of hard-coded rules.
-    """
-    return [
-        LLMDepartment("Growth Department", "profit", model=model, temperature=temperature),
-        LLMDepartment("Trading/Opportunity Team", "profit", model=model, temperature=temperature),
-        LLMDepartment("Compliance Department", "sustainability", model=model, temperature=temperature),
-        LLMDepartment("Operations Department", "balanced", model=model, temperature=temperature),
-        LLMDepartment("Risk Department", "risk_averse", model=model, temperature=temperature),
-    ]
+TEMPERATURE = 0.3
+MAX_STEPS = int(os.environ.get("LLM_MAX_STEPS", "20"))
+SMOKE = bool(os.environ.get("SMOKE"))
 
 
-def create_environment(rng=None):
-    """
-    Create the liquidity reserve environment.
+def slug(model_name):
+    return model_name.replace("/", "_").replace(":", "-")
 
-    Uses the same stochastic parameters as the baseline for fair comparison.
-    """
+
+def make_env():
     return LiquidityReserveEnvironment(
         recovery_noise_std=0.05,
         shock_probability=0.05,
         shock_magnitude=10.0,
-        rng=rng,
     )
+
+
+def build_mechanisms_for_model(model):
+    # Three Centralized variants (matching main.py) so the LLM coordinator is
+    # compared against every rule-based leader archetype, not just one.
+    return [
+        IndependentCoordination(),
+        CentralizedCoordination(leader_index=1, name_suffix="_profit"),
+        CentralizedCoordination(leader_index=2, name_suffix="_sustainability"),
+        CentralizedCoordination(leader_index=4, name_suffix="_risk_averse"),
+        StructuredDebateCoordination(),
+        LLMCentralizedCoordination(model=model, temperature=TEMPERATURE),
+        CrewAIDebateCoordination(
+            model=model,
+            temperature=TEMPERATURE,
+            allow_delegation=False,
+        ),
+    ]
 
 
 def main():
-    # LLM simulations are expensive, so fewer seeds than the baseline.
-    max_steps = 100
-    n_seeds = 5
+    if not os.environ.get("OPENROUTER_API_KEY"):
+        print("ERROR: set OPENROUTER_API_KEY before running.", file=sys.stderr)
+        sys.exit(1)
 
-    output_dir = Path("results/llm")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "figures").mkdir(exist_ok=True)
+    multi_model = len(MODELS) > 1
+    max_steps = min(MAX_STEPS, 2) if SMOKE else MAX_STEPS
+    base_dir = Path("results/llm")
+    base_dir.mkdir(parents=True, exist_ok=True)
 
-    coordination_mechanisms = [
-        IndependentCoordination(),
-        VotingCoordination(),
-        CentralizedCoordination(leader_index=1),
-        DebateCoordination(),
-    ]
-
-    all_histories = {}
-    all_metrics = []
-
-    for mechanism in coordination_mechanisms:
-        print(f"\n--- {mechanism.name} ---")
-        mechanism_histories = []
-
-        for seed in range(n_seeds):
-            print(f"  seed {seed}/{n_seeds - 1} ...", end=" ", flush=True)
-
-            environment = create_environment()
-            departments = create_llm_departments()
-
-            history, elapsed = run_simulation(
-                environment=environment,
-                departments=departments,
-                coordination=mechanism,
-                max_steps=max_steps,
-                seed=seed,
-            )
-
-            mechanism_histories.append(history)
-
-            run_metrics = compute_metrics(
-                history=history,
-                departments=departments,
-                max_steps=max_steps,
-                wall_time_seconds=elapsed,
-                seed=seed,
-            )
-
-            all_metrics.append(run_metrics)
-            print(f"steps={len(history)}, time={elapsed:.1f}s")
-
-        all_histories[mechanism.name] = mechanism_histories
-
-    # --- Detailed CSV ---
-
-    detailed_df = pd.DataFrame(all_metrics)
-    detailed_df.to_csv(output_dir / "detailed_runs.csv", index=False)
-
-    # --- Aggregated CSV ---
-
-    numeric_cols = [
-        "final_reserve", "average_reserve", "steps_survived",
-        "total_withdrawal", "average_reward", "reward_inequality_gini",
-        "total_messages", "total_rounds", "wall_time_seconds",
-    ]
-
-    aggregated_rows = []
-    for mechanism in coordination_mechanisms:
-        mech_df = detailed_df[detailed_df["mechanism"] == mechanism.name]
-        row = {"mechanism": mechanism.name}
-        for col in numeric_cols:
-            row[f"{col}_mean"] = mech_df[col].mean()
-            row[f"{col}_std"] = mech_df[col].std()
-        row["crisis_rate"] = mech_df["liquidity_crisis"].mean()
-        aggregated_rows.append(row)
-
-    aggregated_df = pd.DataFrame(aggregated_rows)
-
-    print("\n=== LLM Aggregated Metrics (mean ± std over {} seeds) ===".format(n_seeds))
-    print(aggregated_df.to_string(index=False))
-
-    aggregated_df.to_csv(output_dir / "aggregated_comparison.csv", index=False)
-
-    # --- Plots ---
-
-    plot_liquidity_confidence_bands(
-        all_histories_by_mechanism=all_histories,
-        max_steps=max_steps,
-        output_path=str(output_dir / "figures" / "reserve_confidence_bands.png"),
+    print(
+        f"Running LLM sweep: {len(MODELS)} model{'s' if multi_model else ''}, "
+        f"max_steps={max_steps}"
+        + ("  (SMOKE mode)" if SMOKE else "")
     )
 
-    plot_metrics_comparison(
-        aggregated_df=aggregated_df,
-        output_path=str(output_dir / "figures" / "metrics_comparison.png"),
-    )
+    per_model_dfs = []
+    for model in MODELS:
+        if multi_model:
+            print(f"\n{'=' * 78}")
+            print(f"  Model: {model}")
+            print('=' * 78)
 
-    plot_action_distributions(
-        all_histories_by_mechanism=all_histories,
-        output_path=str(output_dir / "figures" / "action_distributions.png"),
-    )
+        compositions = make_compositions(
+            LLMDepartment, model=model, temperature=TEMPERATURE,
+        )
+        if SMOKE:
+            compositions = {"standard": compositions["standard"]}
+
+        mechanisms = build_mechanisms_for_model(model)
+
+        run_dir = base_dir / slug(model) if multi_model else base_dir
+        agg = run_experiment_sweep(
+            coordination_mechanisms=mechanisms,
+            compositions=compositions,
+            env_factory=make_env,
+            n_seeds=1,
+            max_steps=max_steps,
+            output_dir=str(run_dir),
+            scales=None,
+            progress=True,
+        )
+        agg["model"] = model
+        per_model_dfs.append(agg)
+
+    if multi_model:
+        combined = pd.concat(per_model_dfs, ignore_index=True)
+        raw_dir = base_dir / "raw"
+        fig_dir = base_dir / "figures"
+        raw_dir.mkdir(exist_ok=True)
+        fig_dir.mkdir(exist_ok=True)
+
+        combined_path = raw_dir / "multi_model_aggregated.csv"
+        combined.to_csv(combined_path, index=False)
+        print(f"\nWrote {combined_path} ({len(combined)} rows)")
+
+        plot_path = fig_dir / "model_comparison.png"
+        plot_model_comparison(
+            aggregated_df=combined,
+            composition="standard",
+            output_path=str(plot_path),
+        )
+        print(f"Wrote {plot_path}")
 
 
 if __name__ == "__main__":

@@ -1,103 +1,85 @@
-import os
-import re
-
-from openai import OpenAI
-
-
-# Shared client instance, initialized once.
-_client = None
-
-
-def _get_client():
-    """Return a shared OpenAI client configured for OpenRouter (lazy initialization)."""
-    global _client
-    if _client is None:
-        _client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=os.getenv("OPENROUTER_API_KEY"),
-        )
-    return _client
-
-
-ROLE_PROMPTS = {
-    "profit": (
-        "You are the Growth Department. Your priority is aggressive investment "
-        "and maximizing returns. You prefer high withdrawals when liquidity is "
-        "available, and only reduce spending when the reserve is dangerously low."
-    ),
-    "sustainability": (
-        "You are the Compliance Department. Your priority is protecting the "
-        "reserve and ensuring long-term sustainability. You strongly prefer "
-        "low withdrawals unless the reserve is very healthy."
-    ),
-    "balanced": (
-        "You are the Operations Department. You balance funding needs with "
-        "reserve stability. You adapt your spending to the current state of "
-        "the reserve, withdrawing more when liquidity is high and less when "
-        "it is low."
-    ),
-    "risk_averse": (
-        "You are the Risk Department. You strongly avoid liquidity crisis. "
-        "You almost always prefer low withdrawals unless the reserve is at "
-        "near-full capacity."
-    ),
-}
+from src.llm_client import call_openrouter, get_llm_model, parse_action
+from src.prompts import ROLE_PROMPTS
 
 
 class LLMDepartment:
-    """
-    LLM-based department drawing from a common liquidity reserve.
+    """Drop-in LLM replacement for the rule-based Department.
 
-    Same interface as the rule-based Department class so that it can be
-    used as a drop-in replacement in the simulation loop.
-
-    Each call to propose_action sends a prompt to OpenAI and parses
-    the response as one of L, M, or H.
+    `memory_window` of 0 disables history (agent sees only the current
+    reserve); used by the memory-ablation experiment to isolate the
+    contribution of cross-step history.
     """
 
-    def __init__(self, name, role, model="gpt-4o-mini", temperature=0.3):
-        """
-        Parameters:
-
-        name:
-            Department name (for display and logging).
-
-        role:
-            One of: profit, sustainability, balanced, risk_averse.
-
-        model:
-            OpenAI model identifier.
-
-        temperature:
-            Sampling temperature. Lower values produce more deterministic
-            behavior, higher values encourage exploration.
-        """
+    def __init__(self, name, role, model=None, temperature=0.3,
+                 memory_window=5):
         self.name = name
         self.role = role
-        self.model = model
+        self.model = model or get_llm_model()
         self.temperature = temperature
+        self.memory_window = memory_window
         self.total_reward = 0.0
-
-        # History of recent decisions for context.
+        self.last_llm_calls = 0
+        self.last_llm_latency_ms = 0.0
+        self.last_llm_model = ""
         self._recent_history = []
 
-    def reset(self):
-        """Reset accumulated reward and history before a new simulation."""
+    def reset(self, seed=None):
+        """`seed` is accepted for interface parity with rule-based Department;
+        LLM behaviour is governed by temperature, not a local RNG."""
         self.total_reward = 0.0
         self._recent_history = []
+        self.last_llm_calls = 0
+        self.last_llm_latency_ms = 0.0
+        self.last_llm_model = ""
+
+    _RISK_THRESHOLDS = {
+        "profit": (10, 25),
+        "sustainability": (30, 60),
+        "balanced": (20, 40),
+        "risk_averse": (40, 70),
+    }
+
+    def get_estimated_risk(self, reserve_level):
+        high_thresh, med_thresh = self._RISK_THRESHOLDS.get(
+            self.role, (20, 40)
+        )
+        if reserve_level < high_thresh:
+            return 1.0
+        if reserve_level < med_thresh:
+            return 0.5
+        return 0.0
+
+    def get_justification_type(self, proposed_action, reserve_level):
+        if self.role == "profit":
+            return "growth"
+        if self.role == "sustainability":
+            return "liquidity_protection"
+        if self.role == "risk_averse":
+            return "crisis_avoidance"
+        return "balancing"
+
+    def justify_action(self, proposed_action, reserve_level):
+        return {
+            "proposed": proposed_action,
+            "risk_estimate": self.get_estimated_risk(reserve_level),
+            "justification_type": self.get_justification_type(
+                proposed_action, reserve_level
+            ),
+            "role": self.role,
+        }
 
     def propose_action(self, reserve_level):
-        """
-        Ask the LLM to choose a withdrawal policy.
+        """Falls back to "M" on API errors so a transient provider failure
+        doesn't abort the simulation."""
+        self.last_llm_calls = 1
+        self.last_llm_latency_ms = 0.0
+        self.last_llm_model = self.model
 
-        Returns one of: "L", "M", "H".
-        """
         system_prompt = ROLE_PROMPTS.get(self.role, ROLE_PROMPTS["balanced"])
 
-        # Build context from recent steps (last 5).
         history_text = ""
-        if self._recent_history:
-            recent = self._recent_history[-5:]
+        if self.memory_window > 0 and self._recent_history:
+            recent = self._recent_history[-self.memory_window:]
             lines = []
             for entry in recent:
                 lines.append(
@@ -115,36 +97,30 @@ class LLMDepartment:
             f"Do not include any other text."
         )
 
+        # max_tokens=512 gives reasoning models (e.g. deepseek-v4-flash) room
+        # to think before emitting the L/M/H letter — at lower caps they burn
+        # the whole budget on hidden reasoning tokens and return empty content,
+        # which parse_action silently maps to "M". 512 is also safely above the
+        # >=16 minimum that Azure-served gpt-5.4-nano enforces. parse_action
+        # extracts the first L/M/H character regardless of preceding text.
         try:
-            client = _get_client()
-            response = client.chat.completions.create(
-                model=self.model,
+            response = call_openrouter(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                model=self.model,
                 temperature=self.temperature,
-                max_tokens=5,
+                max_tokens=512,
             )
-
-            raw = response.choices[0].message.content.strip().upper()
-
-            # Parse the response: extract L, M, or H.
-            match = re.search(r"[LMH]", raw)
-            if match:
-                return match.group(0)
-
-            # If parsing fails, fall back to M.
-            return "M"
-
         except Exception:
-            # On API error, fall back to M to keep the simulation running.
             return "M"
+
+        self.last_llm_latency_ms = response.latency_ms
+        return parse_action(response)
 
     def receive_reward(self, withdrawal, reserve_level, crisis):
-        """
-        Reward function (identical to rule-based Department).
-        """
+        """Reward function (identical to rule-based Department)."""
         if self.role == "profit":
             reward = withdrawal
         elif self.role == "sustainability":
@@ -171,7 +147,6 @@ class LLMDepartment:
 
         self.total_reward += reward
 
-        # Store for context in future prompts.
         step = len(self._recent_history)
         self._recent_history.append({
             "step": step,

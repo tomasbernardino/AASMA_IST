@@ -4,7 +4,27 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
+from dotenv import load_dotenv
 from openai import OpenAI
+
+
+load_dotenv()
+
+
+def get_llm_model(*env_names):
+    """Return the configured LLM model, checking `env_names` in order then
+    falling back to ``LLM_MODEL``. Re-runs ``load_dotenv`` so callers that
+    didn't load .env at import time still pick it up."""
+    load_dotenv()
+    for env_name in env_names:
+        value = os.environ.get(env_name)
+        if value:
+            return value
+    value = os.environ.get("LLM_MODEL")
+    if value:
+        return value
+    checked = ", ".join((*env_names, "LLM_MODEL")) or "LLM_MODEL"
+    raise ValueError(f"Set one of these environment variables first: {checked}.")
 
 
 @dataclass
@@ -19,7 +39,6 @@ _client = None
 
 
 def get_client() -> OpenAI:
-    """Return OpenRouter client (lazy initialization)."""
     global _client
     if _client is None:
         _client = OpenAI(
@@ -31,75 +50,56 @@ def get_client() -> OpenAI:
 
 def call_openrouter(
     messages: list[dict],
-    model: str = "openai/gpt-4o-mini",
+    model: str | None = None,
     temperature: float = 0.3,
     max_tokens: int = 1000,
 ) -> LLMResponse:
-    """
-    Call OpenRouter API and return structured response.
-    
-    Parameters:
-        messages: List of message dicts with 'role' and 'content'
-        model: OpenRouter model identifier
-        temperature: Sampling temperature
-        max_tokens: Max tokens in response
-        
-    Returns:
-        LLMResponse with content, model, latency, and token count
-    """
     start_time = time.perf_counter()
-    
+
     client = get_client()
+    resolved_model = model or get_llm_model()
     response = client.chat.completions.create(
-        model=model,
+        model=resolved_model,
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,
     )
-    
+
     latency_ms = (time.perf_counter() - start_time) * 1000
     content = response.choices[0].message.content
     tokens = response.usage.total_tokens if response.usage else None
-    
+
     return LLMResponse(
         content=content,
-        model=model,
+        model=resolved_model,
         latency_ms=latency_ms,
         tokens=tokens,
     )
 
 
 def parse_action(response: LLMResponse) -> str:
-    """
-    Parse LLM response to extract action: L, M, or H.
-    
-    Falls back to 'M' if parsing fails.
-    """
+    """Extract L/M/H from the response; fall back to 'M' on any failure."""
     if not response.content:
         return "M"
-    
+
     match = re.search(r"[LMH]", response.content.upper())
     return match.group(0) if match else "M"
 
 
 def parse_json_action(response: LLMResponse) -> dict:
-    """
-    Parse LLM response expecting JSON with 'action' and 'reason' fields.
-    
-    Falls back to default if parsing fails.
-    """
+    """Parse {action, reason} JSON; fall back to {'M', 'parse_failed'}."""
     import json
-    
+
     if not response.content:
         return {"action": "M", "reason": "parse_failed"}
-    
+
     try:
         data = json.loads(response.content)
         if "action" in data and data["action"] in ["L", "M", "H"]:
             return data
     except json.JSONDecodeError:
         pass
-    
+
     match = re.search(r'\{[^}]*"action"\s*:\s*["\']?([LMH])["\']?', response.content, re.IGNORECASE)
     if match:
         reason_match = re.search(r'"reason"\s*:\s*"([^"]*)"', response.content)
@@ -107,24 +107,13 @@ def parse_json_action(response: LLMResponse) -> dict:
             "action": match.group(1),
             "reason": reason_match.group(1) if reason_match else "fallback",
         }
-    
+
     return {"action": "M", "reason": "parse_failed"}
 
 
 def parse_per_dept_actions(response: LLMResponse, dept_names: list[str], fallback: str = "M") -> dict:
-    """
-    Parse LLM response expecting per-department action JSON.
-
-    Expected format:
-        {
-          "Growth Department": "H",
-          "Risk Department": "L",
-          ...
-          "reason": "brief explanation"
-        }
-
-    Falls back to applying the fallback action to all departments if parsing fails.
-    """
+    """Parse per-department action JSON ({dept_name: "L|M|H", ..., reason}).
+    On failure, apply `fallback` to every department."""
     import json
 
     result = {name: fallback for name in dept_names}
@@ -133,18 +122,43 @@ def parse_per_dept_actions(response: LLMResponse, dept_names: list[str], fallbac
     if not response.content:
         return result
 
-    try:
-        data = json.loads(response.content)
+    content = response.content.strip()
+    content = re.sub(r"^```(?:json)?\s*", "", content, flags=re.IGNORECASE)
+    content = re.sub(r"\s*```$", "", content)
+
+    json_candidates = [content]
+    object_match = re.search(r"\{.*\}", content, re.DOTALL)
+    if object_match:
+        json_candidates.append(object_match.group(0))
+
+    for candidate in json_candidates:
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
         for name in dept_names:
             action = data.get(name, fallback)
+            if isinstance(action, str):
+                action = action.strip().upper()
             result[name] = action if action in ["L", "M", "H"] else fallback
         result["reason"] = data.get("reason", "")
         return result
-    except json.JSONDecodeError:
-        pass
 
-    # Fallback: try to find a single global action and apply to all
-    match = re.search(r'"action"\s*:\s*["\']?([LMH])["\']?', response.content, re.IGNORECASE)
+    # Loose JSON or prose with per-dept assignments.
+    found_any = False
+    for name in dept_names:
+        pattern = rf"{re.escape(name)}[\"'\s:=-]+([LMH])\b"
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            result[name] = match.group(1).upper()
+            found_any = True
+    if found_any:
+        reason_match = re.search(r'"reason"\s*:\s*"([^"]*)"', content)
+        result["reason"] = reason_match.group(1) if reason_match else "loose_assignment_fallback"
+        return result
+
+    # Single global action -> broadcast to all departments.
+    match = re.search(r'"action"\s*:\s*["\']?([LMH])["\']?', content, re.IGNORECASE)
     if match:
         global_action = match.group(1).upper()
         for name in dept_names:

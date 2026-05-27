@@ -231,13 +231,20 @@ parsed = parse_per_dept_actions(response, dept_names)
 final_actions = [parsed[name] for name in dept_names]
 ```
 
-**Cost:** 6 messages · 1 round · **1 LLM call** · ~500–2000ms.
+**Coordination cost:** 6 messages · 1 round · **1 coordinator LLM call** · ~500-2000ms.
+
+**LLM-track total:** when paired with `LLMDepartment`, add 5 department proposal
+LLM calls per step, so the measured run-level cost is 6 LLM calls/step for this
+mechanism.
 
 ---
 
 ## Mechanism 7 — CrewAI Debate
 
-**Concept:** Genuine multi-agent orchestration. Each department is a CrewAI Agent with role/goal/backstory; it produces a natural language argument. A Moderator Agent reads all arguments and allocates a **per-department budget level**.
+**Concept:** Genuine multi-agent orchestration. Each department is a CrewAI Agent
+with role/goal/backstory. Agents now argue in two rounds (opening argument, then
+rebuttal after seeing the openings), and a Moderator Agent synthesizes the debate
+into a **per-department budget level**.
 
 **Action model:** Per-dept.
 
@@ -245,19 +252,25 @@ final_actions = [parsed[name] for name in dept_names]
 
 1. **5 Department Agents** built with role metadata from `ROLE_METADATA` dict
 2. **1 Moderator Agent** built with neutral synthesis role
-3. **5 Department Tasks** — each agent argues:
-   > *"Reserve is at 45.3/100 (DANGEROUS). Your policy proposes H. In 2-3 sentences, argue why H is right for the organization."*
-4. **1 Moderator Task** — reads all 5 dept outputs via `context=dept_tasks`, then:
+3. **5 Opening Tasks** — each department defends its proposed action in 2-3 sentences
+4. **5 Rebuttal Tasks** — each department reads all opening arguments, may ask one clarifying delegated question, and either defends or revises its action
+5. **1 Moderator Task** — reads openings + rebuttals via context, then:
    > *"Allocate a withdrawal level to EACH department individually. Output JSON: {"Growth Department": "L or M or H", ..., "reason": "..."}"*
-5. Output parsed with `parse_per_dept_actions()` — same parser as LLMCentralized
+6. Output parsed with `parse_per_dept_actions()` — same parser as LLMCentralized
 
 **Key difference from LLMCentralized:**
-- LLMCentralized: 1 call, structured data input, CFO decides all at once
-- CrewAI: 6 calls, natural language arguments, each dept has its own agent context
+- LLMCentralized: 1 coordinator call, structured data input, CFO decides all at once
+- CrewAI: 11 coordinator calls before optional delegation, natural language arguments, each dept has its own agent context
 
-**Current limitation:** Departments argue without seeing each other's arguments (dept tasks don't chain context between themselves — only the moderator sees all). True iterative debate (where dept 2 responds to dept 1) is marked for future work.
+**Current limitation:** CrewAI delegation can trigger additional sub-calls that
+are not individually counted by the coordination object, so `llm_calls` is a
+lower bound for CrewAI debate. Wall-clock latency is still measured directly.
 
-**Cost:** 11 messages · 2 rounds · **6 LLM calls** · ~3000–12000ms.
+**Coordination cost:** 11 messages · 3 rounds · **11 coordinator LLM calls plus
+optional delegation** · latency depends heavily on provider and delegation.
+
+**LLM-track total:** when paired with `LLMDepartment`, add 5 department proposal
+LLM calls per step, so the measured run-level lower bound is 16 LLM calls/step.
 
 ---
 
@@ -270,8 +283,8 @@ final_actions = [parsed[name] for name in dept_names]
 | AdaptiveVoting | ❌ (global policy) | 0 | 5 | 1 | < 1ms |
 | Centralized ×3 | ✅ (leader cap) | 0 | 6 | 1 | < 1ms |
 | StructuredDebate | ✅ (mode per prop) | 0 | 15 | 2 | < 1ms |
-| LLMCentralized | ✅ (CFO allocates) | 1 | 6 | 1 | ~1s |
-| CrewAIDebate | ✅ (moderator allocs) | 6 | 11 | 2 | ~6s |
+| LLMCentralized | ✅ (CFO allocates) | 1 coord / 6 with LLM depts | 6 | 1 | ~1s+ |
+| CrewAIDebate | ✅ (moderator allocs) | 11 coord / 16+ with LLM depts | 11 | 3 | provider-dependent |
 
 ---
 
@@ -287,7 +300,7 @@ no coord.      policy     global policy    informed       rule-mode          LLM
                                            leader cap     per proposal       about roles     in natural
                                                                                              language
 
-LLM calls:    0          0          0              0              0                1               6
+Coord calls:  0          0          0              0              0                1               11+
 ```
 
 **Core question:** Does each step up this ladder improve sustainability enough to justify the added coordination cost?  

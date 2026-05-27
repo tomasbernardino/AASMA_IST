@@ -80,13 +80,27 @@ def compute_metrics(history, departments, max_steps=100, wall_time_seconds=None,
             dept.name: dept.total_reward for dept in departments
         },
     }
+
+    # Per-role mean reward. Lets the report make claims like "mechanism X
+    # helps role Y at role Z's expense", which is more honest than
+    # social_welfare (a sum across roles whose utility functions are on
+    # different scales — see src/agents.py::receive_reward).
+    role_rewards = {}
+    for dept in departments:
+        role_rewards.setdefault(dept.role, []).append(dept.total_reward)
+    for role, rewards in role_rewards.items():
+        metrics[f"reward_{role}"] = float(np.mean(rewards))
     
     llm_calls = sum(step.get("llm_calls", 0) for step in history)
     llm_latency = sum(step.get("llm_latency_ms", 0) for step in history)
-    
+
     if llm_calls > 0:
         metrics["llm_calls"] = llm_calls
         metrics["llm_total_latency_ms"] = llm_latency
         metrics["llm_avg_latency_ms"] = llm_latency / llm_calls
-    
+        # Model is constant per mechanism run; take the first non-empty value.
+        models = [m for m in (step.get("model", "") for step in history) if m]
+        if models:
+            metrics["model"] = models[0]
+
     return metrics

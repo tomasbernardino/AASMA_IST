@@ -19,6 +19,14 @@ class CoordinationMechanism:
 
     name = "base"
 
+    def reset(self):
+        """
+        Called at the start of each simulation episode (once per seed).
+        Subclasses that carry state across decide() calls (e.g. cross-step
+        memory) override this to clear it. Stateless mechanisms can ignore.
+        """
+        pass
+
     def decide(self, proposals, reserve_level=None, departments=None):
         raise NotImplementedError
 
@@ -166,10 +174,6 @@ class CentralizedCoordination(CoordinationMechanism):
 
         return final_actions, cost
 
-
-
-
-
 class StructuredDebateCoordination(CoordinationMechanism):
     """
     Structured rule-based debate with explicit aggregation rules.
@@ -239,24 +243,57 @@ class StructuredDebateCoordination(CoordinationMechanism):
 
 
 class LLMCentralizedCoordination(CoordinationMechanism):
-    """
-    LLM-based centralized coordination.
-    
-    Departments submit proposals, an LLM acts as CFO/treasury leader
-    and chooses the final action with reasoning.
-    """
+    """LLM-based centralized coordination: an LLM acts as CFO/treasury
+    leader and allocates a per-department action from the proposals."""
 
     name = "llm_centralized"
 
     def __init__(
         self,
-        model: str = "openai/gpt-4o-mini",
+        model: str | None = None,
         temperature: float = 0.3,
         crisis_threshold: float = 5,
+        memory_window: int = 5,
     ):
-        self.model = model
+        # Local import so the rule-based path doesn't load the LLM stack.
+        from src.llm_client import get_llm_model
+
+        self.model = model or get_llm_model()
         self.temperature = temperature
         self.crisis_threshold = crisis_threshold
+        self.memory_window = memory_window
+        self._memory_log = []
+        self._step_counter = 0
+
+    def reset(self):
+        self._memory_log = []
+        self._step_counter = 0
+
+    def _build_memory_blurb(self):
+        """Mirrors CrewAIDebateCoordination's memory context so a memory
+        advantage doesn't confound the mechanism comparison."""
+        if not self._memory_log:
+            return ""
+        recent = self._memory_log[-self.memory_window:]
+        lines = []
+        for entry in recent:
+            actions = ",".join(entry["actions"])
+            after = (
+                f"{entry['reserve_after']:.1f}"
+                if entry["reserve_after"] is not None
+                else "?"
+            )
+            lines.append(
+                f"  Step {entry['step']}: reserve {entry['reserve_before']:.1f} -> "
+                f"{after}, you decided actions=[{actions}]"
+            )
+        return (
+            "Recent decision history (last "
+            f"{len(recent)} steps, oldest first):\n"
+            + "\n".join(lines)
+            + "\n\nFactor this trajectory in: are recent decisions holding "
+            "the reserve steady or is it trending toward crisis?\n\n"
+        )
 
     def decide(self, proposals, reserve_level=None, departments=None):
         if reserve_level is None:
@@ -264,8 +301,13 @@ class LLMCentralizedCoordination(CoordinationMechanism):
         if departments is None:
             raise ValueError("LLMCentralizedCoordination requires departments.")
 
+        # Local imports so the rule-based path doesn't load the LLM stack.
         from src.prompts import build_centralized_leader_prompt
         from src.llm_client import call_openrouter, parse_per_dept_actions
+
+        # Backfill: previous step's outcome is only observable now.
+        if self._memory_log:
+            self._memory_log[-1]["reserve_after"] = reserve_level
 
         dept_names = [dept.name for dept in departments]
 
@@ -276,6 +318,10 @@ class LLMCentralizedCoordination(CoordinationMechanism):
             reserve_capacity=100,
             crisis_threshold=self.crisis_threshold,
         )
+
+        memory_blurb = self._build_memory_blurb()
+        if memory_blurb:
+            user_prompt = memory_blurb + user_prompt
 
         response = None
         rationale = "llm_error"
@@ -292,8 +338,17 @@ class LLMCentralizedCoordination(CoordinationMechanism):
             parsed = parse_per_dept_actions(response, dept_names)
             final_actions = [parsed[name] for name in dept_names]
             rationale = parsed.get("reason", "")
-        except Exception:
+        except Exception as e:
             final_actions = ["M" for _ in proposals]
+            rationale = f"llm_error: {str(e)[:120]}"
+
+        self._memory_log.append({
+            "step": self._step_counter,
+            "reserve_before": reserve_level,
+            "reserve_after": None,
+            "actions": list(final_actions),
+        })
+        self._step_counter += 1
 
         cost = {
             "messages": len(proposals) + 1,
@@ -301,9 +356,8 @@ class LLMCentralizedCoordination(CoordinationMechanism):
             "llm_calls": 1,
             "llm_latency_ms": response.latency_ms if response else 0,
             "rationale": rationale,
+            "model": self.model,
         }
 
         return final_actions, cost
-
-
 
