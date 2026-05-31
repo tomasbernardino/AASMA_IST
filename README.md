@@ -54,7 +54,7 @@ python main_llm_memory_ablation.py
 SMOKE=1 python main_llm.py
 ```
 
-All entry points write CSVs to `results/raw/` (or `results/llm/`, `results/llm_memory/`) and PNGs to `results/figures/`. `results/` is gitignored.
+All entry points write CSVs to `results/raw/` (or `results/llm/`, `results/llm_memory/`) and PNGs to `results/figures/`. See `results/README.md` for what each file shows.
 
 ## Departments and compositions
 

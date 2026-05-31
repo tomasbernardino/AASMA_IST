@@ -1,6 +1,5 @@
 __pycache__/
 *.pyc
-results/
 .env
 .python_packages/
 .venv/
