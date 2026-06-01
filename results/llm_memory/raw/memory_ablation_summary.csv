@@ -1,7 +1,0 @@
-mechanism,memory_mode,final_reserve,average_reserve,steps_survived,social_welfare,liquidity_crisis
-crewai_debate,full_history,22.948,47.323,20.0,142.786,0.0
-crewai_debate,previous,47.223,64.409,20.0,170.76,0.0
-independent,full_history,1.126,44.284,20.0,145.104,1.0
-independent,previous,0.0,36.271,16.0,101.796,1.0
-llm_centralized,full_history,48.552,66.952,20.0,157.806,0.0
-llm_centralized,previous,25.675,50.239,20.0,163.153,0.0

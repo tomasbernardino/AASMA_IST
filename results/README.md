@@ -2,24 +2,28 @@
 
 Reference for everything in this directory — what each entry-point script writes and what each artifact shows.
 
-Four entry points produce results:
+Entry points that produce results:
 
-| Script                          | Writes to                                       |
-|---------------------------------|-------------------------------------------------|
-| `main.py`                       | `results/raw/`, `results/figures/`              |
-| `sensitivity_analysis.py`       | `results/raw/sensitivity_*.csv`, `results/figures/sensitivity_heatmap.png` |
-| `main_llm.py`                   | `results/llm/` (and `results/llm/<model_slug>/` when `LLM_MODELS=a,b,c`) |
-| `main_llm_memory_ablation.py`   | `results/llm_memory/raw/`                       |
+| Script                              | Writes to                                       |
+|-------------------------------------|-------------------------------------------------|
+| `main.py`                           | `results/raw/`, `results/figures/`              |
+| `sensitivity_analysis.py`           | `results/raw/sensitivity_*.csv`, `results/figures/sensitivity_heatmap.png` |
+| `main_llm.py`                       | `results/llm/` (and `results/llm/<model_slug>/` when `LLM_MODELS=a,b,c`) |
+| `main_llm_memory_ablation.py`       | `results/llm_memory/raw/`                       |
+| `main_llm_universalization.py`      | `results/universalization/{off,on}/{raw,figures}/` + `universalization_ablation.csv` |
+| `main_llm_negotiation.py`           | `results/negotiation/{raw,figures}/`            |
 
 Sweep shapes are encoded in the scripts; counts below are what a complete run produces.
+
+All four compositions (`standard`, `aggressive`, `conservative`, `free_rider`) are covered by `main.py` and `main_llm.py` — `make_compositions()` returns every entry of `COMPOSITION_SPECS`. The LLM `free_rider` rows currently on disk were appended from a second OpenRouter session; with `temperature=0.3` and `n_seeds=1`, every row of the LLM CSV is already an independent draw, so the cross-session boundary doesn't introduce noise that wasn't there before. The history-based LLM figures (`reserve_confidence_bands.png`, `action_distributions.png`, `reserve_by_composition.png`) were generated from the original 3-composition session and still reflect those three compositions only — re-running `main_llm.py` end-to-end is what would refresh them.
 
 ---
 
 ## `results/raw/` — rule-based sweep
 
-Written by `main.py`. Sweep shape: **20 seeds × 7 mechanisms × 3 compositions × 4 scales = 1680 runs**.
+Written by `main.py`. Sweep shape: **20 seeds × 7 mechanisms × 4 compositions × 4 scales = 2240 runs**.
 
-### `detailed_runs.csv` (1680 rows + header)
+### `detailed_runs.csv` (2240 rows + header)
 One row per `(mechanism, composition, scale, seed)`. Canonical analysis artifact; everything else is derived from this.
 
 Identity columns: `mechanism`, `seed`, `composition`, `scale`.
@@ -36,8 +40,8 @@ Outcome columns (from `src/metrics.py::compute_metrics`):
 - `wall_time_seconds` — runtime of the simulation loop only.
 - `debate_override_rate` — fraction of steps where the debate mechanism overrode a proposed action (0 for non-debate mechanisms).
 
-### `aggregated_comparison.csv` (252 rows + header)
-One row per `(mechanism, composition, scale)`: mean and std of every numeric metric across the 20 seeds, plus `crisis_rate` (mean of the boolean `liquidity_crisis` column).
+### `aggregated_comparison.csv` (112 rows + header)
+One row per `(mechanism, composition, scale)` = 7 × 4 × 4: mean and std of every numeric metric across the 20 seeds, plus `crisis_rate` (mean of the boolean `liquidity_crisis` column).
 
 ---
 
@@ -49,7 +53,7 @@ All PNGs in this directory come from `main.py` (which calls `src/plotting.py`) a
 - **`reserve_confidence_bands.png`** — Mean reserve trajectory ± 1 std across seeds, one line per mechanism, on `composition="standard", scale="standard"`. Shows sustainability over time, not just at termination.
 - **`action_distributions.png`** — Stacked bars: proportion of `L`/`M`/`H` final actions per mechanism (pooled across all steps and seeds). Shows what coordination *actually does* to agent behaviour.
 - **`per_role_rewards.png`** — One subplot per role (profit / sustainability / balanced / risk-averse) showing mean reward by mechanism. Reveals whether a mechanism wins social welfare by helping everyone or by trading roles off.
-- **`metrics_by_composition.png`** — Grid: rows are compositions (standard / aggressive / conservative), columns are key metrics. Shows whether a mechanism's advantage survives a different role mix.
+- **`metrics_by_composition.png`** — Grid: rows are compositions (standard / aggressive / conservative / free_rider), columns are key metrics. Shows whether a mechanism's advantage survives a different role mix, including under a saboteur (`free_rider`).
 - **`reserve_by_composition.png`** — Like `reserve_confidence_bands.png` but one panel per composition.
 - **`pareto_cost_vs_welfare.png`** — Two-panel scatter on `composition="standard"`: coordination cost (x) vs social welfare (left panel) and vs crisis-avoidance rate `1 - crisis_rate` (right panel). The Pareto frontier is drawn through non-dominated points. For LLM sweeps the cost axis switches to `llm_calls_mean`; for rule-based it's `total_messages_mean`.
 - **`scale_robustness.png`** — Grouped bars on `composition="standard"`: for each mechanism, one bar per L/M/H scale (`standard`, `wide`, `asymmetric`, `compressed`). Parallel bars ⇒ ranking preserved across scales; crossings ⇒ scale-dependent ranking. Three panels: crisis rate, social welfare, average reserve.
@@ -68,7 +72,7 @@ Written by `sensitivity_analysis.py`. Sweep shape: **7 mechanisms × 3 noise lev
 
 ## `results/llm/` — LLM track
 
-Written by `main_llm.py`. Sweep shape per model: **1 seed × 7 mechanisms × 3 compositions = 21 runs**. Scales sweep is intentionally not run for the LLM track.
+Written by `main_llm.py`. Sweep shape per model: **1 seed × 7 mechanisms × 4 compositions = 28 runs**. Scales sweep is intentionally not run for the LLM track.
 
 The 7 mechanisms are: `independent`, `centralized_profit`, `centralized_sustainability`, `centralized_risk_averse`, `structured_debate`, `llm_centralized`, `crewai_debate`. Voting and AdaptiveVoting are excluded (no natural LLM analog).
 
@@ -79,7 +83,7 @@ The 7 mechanisms are: `independent`, `centralized_profit`, `centralized_sustaina
 Currently on disk: three model subdirs — `deepseek_deepseek-v4-flash/`, `google_gemma-4-31b-it/`, `openai_gpt-5.4-nano/`.
 
 ### Per-model `raw/`
-- **`detailed_runs.csv`** (21 rows + header) — Same columns as the rule-based version, plus:
+- **`detailed_runs.csv`** (28 rows + header) — Same columns as the rule-based version, plus:
   - `model` — model identifier this run used.
   - `llm_calls` — total LLM completions invoked over the run (departments + coordinator).
   - `llm_total_latency_ms`, `llm_avg_latency_ms` — total and mean wall time waiting on LLM responses.
@@ -103,7 +107,40 @@ Written by `main_llm_memory_ablation.py`. Sweep shape: **2 memory modes × 3 mec
 Memory modes: `previous` (window=1) vs `full_history` (window=5). Mechanisms: `independent`, `llm_centralized`, `crewai_debate`.
 
 - **`memory_ablation.csv`** (6 rows + header) — Same columns as the LLM `detailed_runs.csv` plus `memory_mode` and `memory_window`.
-- **`memory_ablation_summary.csv`** (6 rows + header) — Compact view: `mechanism, memory_mode, final_reserve, average_reserve, steps_survived, social_welfare, liquidity_crisis`.
 
-No figures are written by the ablation script.
+No figures are written by the ablation script. (`main_llm_memory_ablation.py` also writes a `memory_ablation_summary.csv` — strict column-subset of the detail CSV — but it was removed as a duplicate; it will be re-created if you re-run the script.)
+
+---
+
+## `results/universalization/` — universalization ablation
+
+Written by `main_llm_universalization.py`. Isolates the effect of a Kantian "universal-impact" prompt on LLM agent behaviour.
+
+Sweep shape: **2 universalization settings × 1 mechanism (Independent) × 4 compositions × 1 seed = 8 runs**. Standard scale only. `MAX_STEPS` is controlled by `LLM_MAX_STEPS` (script default 10; the runs currently on disk were produced with `LLM_MAX_STEPS=20` from `.env`, matching `main_llm.py`).
+
+- **`off/{raw,figures}/`** — full sweep with `universalization=False` (same code path as `main_llm.py`'s Independent row, but a fresh LLM draw — not interchangeable).
+- **`on/{raw,figures}/`** — same sweep with `universalization=True`. The system prompt gains a paragraph asking the agent to reason about what would happen if every department adopted the same policy.
+- **`universalization_ablation.csv`** — concatenation of both aggregated frames with a `universalization` boolean column. The paired comparison artifact.
+
+This is *not* redundant with `main_llm.py`'s Independent row: LLMs at `temperature=0.3` are stochastic and OpenRouter does not honour `seed` for most models, so off-vs-on must be drawn under matched conditions in one script.
+
+The runs currently on disk used `LLM_MODEL=deepseek/deepseek-v4-flash`.
+
+---
+
+## `results/negotiation/` — free-negotiation mechanism
+
+Written by `main_llm_negotiation.py`. Head-to-head between `IndependentCoordination` (no coordination) and `FreeNegotiationCoordination` — a GovSim-style chat-room mechanism added in the GovSim-features commit.
+
+Sweep shape per model: **2 mechanisms × 4 compositions × 1 seed = 8 runs**. Standard scale only. `MAX_STEPS` is controlled by `LLM_MAX_STEPS` (script default 10; the runs currently on disk were produced with `LLM_MAX_STEPS=20` from `.env`).
+
+- `raw/detailed_runs.csv` — 8 rows + header.
+- `raw/aggregated_comparison.csv` — same.
+- `figures/mechanism_comparison.png` — reuses the multi-model plot to compare Independent vs FreeNegotiation across the four compositions.
+
+(`main_llm_negotiation.py` also writes a `negotiation_comparison.csv` that is byte-identical to `aggregated_comparison.csv` — removed as a duplicate; will be re-created if you re-run the script.)
+
+`FreeNegotiationCoordination` is *not* in `main_llm.py`'s mechanism set, so this script is the only place it runs. The Independent baseline here is a fresh LLM draw and is not interchangeable with `main_llm.py`'s Independent row.
+
+The runs currently on disk used `LLM_MODEL=deepseek/deepseek-v4-flash`.
 
