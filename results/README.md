@@ -92,6 +92,13 @@ Currently on disk: three model subdirs — `deepseek_deepseek-v4-flash/`, `googl
 ### Per-model `figures/`
 Same set as `results/figures/` *except* `scale_robustness.png` (no scale sweep) and `sensitivity_heatmap.png` (rule-based only). Same semantics, but the Pareto plot's x-axis is `llm_calls_mean` instead of `total_messages_mean`.
 
+Three of the figures come paired with a `*_free_rider.png` companion:
+- `reserve_confidence_bands.png` ⟷ `reserve_confidence_bands_free_rider.png`
+- `action_distributions.png` ⟷ `action_distributions_free_rider.png`
+- `reserve_by_composition.png` ⟷ `reserve_by_composition_free_rider.png`
+
+These three are history-based plots (per-step trajectory / action mix per `composition × mechanism` key). The original PNGs reflect the first `main_llm.py` session's three compositions; the `_free_rider`-suffixed PNGs reflect the addendum session's free_rider composition only. They are intended to be viewed **side-by-side**: no honest path exists to fold the free_rider data into a single unified figure without the original session's per-step histories, and those are never persisted to disk. `main_free_rider_addendum.py` is the script that produces the `_free_rider` companions; re-running it (~3 h API time) regenerates them from a fresh draw. The CSV-derived figures in this directory always reflect all four compositions.
+
 ### `results/llm/raw/multi_model_aggregated.csv`
 Concatenation of every per-model `aggregated_comparison.csv` with an added `model` column. Multi-model mode only.
 
