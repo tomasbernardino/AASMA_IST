@@ -141,10 +141,11 @@ class CentralizedCoordination(CoordinationMechanism):
 
     def __init__(self, leader_index=0, name_suffix=""):
         self.leader_index = leader_index
-        self.name = f"centralized{name_suffix}"
+        self.name = f"centralized{name_suffix or f'_leader_idx{leader_index}'}"
 
     def decide(self, proposals, reserve_level=None, departments=None):
         leader_proposal = proposals[self.leader_index]
+        leader = departments[self.leader_index] if departments else None
 
         # Leader observes all proposals and adjusts based on group signals.
         conservative_count = sum(1 for p in proposals if p == "L")
@@ -170,9 +171,45 @@ class CentralizedCoordination(CoordinationMechanism):
         cost = {
             "messages": len(proposals) + 1,
             "rounds": 1,
+            "leader_index": self.leader_index,
+            "leader_name": getattr(leader, "name", ""),
+            "leader_role": getattr(leader, "role", ""),
         }
 
         return final_actions, cost
+
+
+class CentralizedRoleCoordination(CentralizedCoordination):
+    """
+    Centralized mechanism where the leader is selected by department role.
+
+    This supports profit-leader vs sustainability-leader vs risk-leader
+    comparisons without silently substituting another role when a composition
+    lacks the requested leader type.
+    """
+
+    def __init__(self, target_role):
+        self.target_role = target_role
+        self.leader_index = None
+        self.name = f"centralized_{target_role}"
+
+    def supports(self, departments):
+        return any(dept.role == self.target_role for dept in departments)
+
+    def _resolve_leader_index(self, departments):
+        for i, dept in enumerate(departments):
+            if dept.role == self.target_role:
+                return i
+        raise ValueError(
+            f"{self.name} requires a department with role={self.target_role!r}."
+        )
+
+    def decide(self, proposals, reserve_level=None, departments=None):
+        if departments is None:
+            raise ValueError(f"{self.name} requires departments.")
+        self.leader_index = self._resolve_leader_index(departments)
+        return super().decide(proposals, reserve_level, departments)
+
 
 class StructuredDebateCoordination(CoordinationMechanism):
     """
@@ -408,11 +445,10 @@ class FreeNegotiationCoordination(CoordinationMechanism):
         cost = {
             "messages": len(departments) * self.chat_rounds + len(departments),
             "rounds": self.chat_rounds + 1,
-            "llm_calls": len(departments) * self.chat_rounds,
+            "llm_calls": len(departments) * self.chat_rounds + len(departments),
             "llm_latency_ms": llm_latency,
             "rationale": transcript,
             "model": getattr(departments[0], "model", "rule-based"),
         }
 
         return final_actions, cost
-

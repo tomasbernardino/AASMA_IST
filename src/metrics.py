@@ -1,28 +1,21 @@
 # src/metrics.py
 
 import numpy as np
-from collections import Counter
 
 
-def gini(values):
+def mean_absolute_gap(values):
     """
-    Compute Gini coefficient for inequality.
+    Mean pairwise absolute reward gap.
 
-    0 means perfect equality.
-    Higher values mean more inequality.
+    Unlike standard Gini, this is valid for signed utilities, which this
+    project uses because crisis/risk penalties can make rewards negative.
+    Lower values mean department outcomes are closer together.
     """
     values = np.array(values, dtype=float)
-
-    # If every department received zero reward, there is no inequality to report.
-    if np.all(values == 0):
+    if len(values) <= 1:
         return 0.0
-
-    values = np.sort(values)
-    n = len(values)
-
-    cumulative = np.cumsum(values)
-
-    return (n + 1 - 2 * np.sum(cumulative) / cumulative[-1]) / n
+    diffs = np.abs(values[:, None] - values[None, :])
+    return float(np.mean(diffs))
 
 
 def compute_metrics(history, departments, max_steps=100, wall_time_seconds=None, seed=None):
@@ -48,6 +41,7 @@ def compute_metrics(history, departments, max_steps=100, wall_time_seconds=None,
 
     # Department rewards are used for efficiency and fairness comparisons.
     total_reward_per_department = [department.total_reward for department in departments]
+    reward_array = np.array(total_reward_per_department, dtype=float)
 
     # Message and round counts approximate the cost of coordination.
     total_messages = sum(step["messages"] for step in history)
@@ -71,7 +65,9 @@ def compute_metrics(history, departments, max_steps=100, wall_time_seconds=None,
         "total_withdrawal": sum(total_withdrawals),
         "average_reward": float(np.mean(total_reward_per_department)),
         "social_welfare": float(np.sum(total_reward_per_department)),
-        "reward_inequality_gini": gini(total_reward_per_department),
+        "mean_absolute_reward_gap": mean_absolute_gap(total_reward_per_department),
+        "reward_std": float(np.std(reward_array)),
+        "reward_range": float(np.max(reward_array) - np.min(reward_array)),
         "total_messages": total_messages,
         "total_rounds": total_rounds,
         "wall_time_seconds": wall_time_seconds,
@@ -80,6 +76,11 @@ def compute_metrics(history, departments, max_steps=100, wall_time_seconds=None,
             dept.name: dept.total_reward for dept in departments
         },
     }
+    if history:
+        for key in ("leader_index", "leader_name", "leader_role"):
+            value = history[0].get(key)
+            if value not in (None, ""):
+                metrics[key] = value
 
     # Per-role mean reward. Lets the report make claims like "mechanism X
     # helps role Y at role Z's expense", which is more honest than

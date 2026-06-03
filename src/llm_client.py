@@ -82,8 +82,16 @@ def parse_action(response: LLMResponse) -> str:
     if not response.content:
         return "M"
 
-    match = re.search(r"[LMH]", response.content.upper())
-    return match.group(0) if match else "M"
+    content = response.content.strip().upper()
+    if content in {"L", "M", "H"}:
+        return content
+
+    match = re.search(r"\b(?:ACTION|FINAL|CHOICE)\s*[:=]\s*([LMH])\b", content)
+    if match:
+        return match.group(1)
+
+    matches = re.findall(r"\b([LMH])\b", content)
+    return matches[-1] if matches else "M"
 
 
 def parse_json_action(response: LLMResponse) -> dict:

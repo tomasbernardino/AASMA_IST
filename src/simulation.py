@@ -122,6 +122,9 @@ def run_simulation(
             "mechanism": coordination.name,
             "justifications": justifications,
         }
+        for key in ("leader_index", "leader_name", "leader_role"):
+            if key in coordination_cost:
+                step_record[key] = coordination_cost[key]
 
         total_llm_calls = department_llm_calls + coordination_cost.get("llm_calls", 0)
         if total_llm_calls > 0:

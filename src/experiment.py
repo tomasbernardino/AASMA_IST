@@ -40,7 +40,7 @@ SCALES = {
 NUMERIC_COLS = [
     "final_reserve", "average_reserve", "steps_survived",
     "total_withdrawal", "average_reward", "social_welfare",
-    "reward_inequality_gini",
+    "mean_absolute_reward_gap", "reward_std", "reward_range",
     "total_messages", "total_rounds", "wall_time_seconds", "debate_override_rate",
 ]
 
@@ -52,6 +52,7 @@ ROLE_REWARD_COLS = [
 ]
 
 LLM_COLS = ["llm_calls", "llm_total_latency_ms", "llm_avg_latency_ms"]
+METADATA_COLS = ["leader_index", "leader_name", "leader_role"]
 
 
 def run_experiment_sweep(
@@ -106,6 +107,16 @@ def run_experiment_sweep(
     for scale_name, scale_map in scales.items():
         for composition_name, dept_factory in compositions.items():
             for mechanism in coordination_mechanisms:
+                support_departments = dept_factory()
+                if hasattr(mechanism, "supports") and not mechanism.supports(support_departments):
+                    if progress:
+                        print(
+                            f"  [{scale_name}/{composition_name}/{mechanism.name}] "
+                            "skipped: leader role unavailable",
+                            flush=True,
+                        )
+                    continue
+
                 mechanism_histories = []
 
                 for seed in range(n_seeds):
@@ -210,6 +221,10 @@ def _aggregate(detailed_df, scales, compositions, coordination_mechanisms):
     for scale_name in scales:
         for composition_name in compositions:
             for mechanism in coordination_mechanisms:
+                support_departments = compositions[composition_name]()
+                if hasattr(mechanism, "supports") and not mechanism.supports(support_departments):
+                    continue
+
                 mech_df = detailed_df[
                     (detailed_df["mechanism"] == mechanism.name) &
                     (detailed_df["composition"] == composition_name) &
@@ -227,6 +242,14 @@ def _aggregate(detailed_df, scales, compositions, coordination_mechanisms):
                     ]
                     if models:
                         row["model"] = models[0]
+                for col in METADATA_COLS:
+                    if col in mech_df.columns:
+                        values = [
+                            value for value in mech_df[col].dropna().astype(str)
+                            if value
+                        ]
+                        if values:
+                            row[col] = values[0]
                 for col in NUMERIC_COLS:
                     if col in mech_df.columns:
                         row[f"{col}_mean"] = mech_df[col].mean()

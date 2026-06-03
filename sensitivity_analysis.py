@@ -22,7 +22,7 @@ from src.coordination import (
     IndependentCoordination,
     VotingCoordination,
     AdaptiveVotingCoordination,
-    CentralizedCoordination,
+    CentralizedRoleCoordination,
     StructuredDebateCoordination,
 )
 from src.compositions import make_compositions
@@ -47,9 +47,9 @@ def build_mechanisms():
         IndependentCoordination(),
         VotingCoordination(),
         AdaptiveVotingCoordination(),
-        CentralizedCoordination(leader_index=1, name_suffix="_profit"),
-        CentralizedCoordination(leader_index=2, name_suffix="_sustainability"),
-        CentralizedCoordination(leader_index=4, name_suffix="_risk_averse"),
+        CentralizedRoleCoordination("profit"),
+        CentralizedRoleCoordination("sustainability"),
+        CentralizedRoleCoordination("risk_averse"),
         StructuredDebateCoordination(),
     ]
 
@@ -118,7 +118,24 @@ def main():
                     "steps_survived_mean": cell["steps_survived"].mean(),
                     "total_withdrawal_mean": cell["total_withdrawal"].mean(),
                     "override_rate_mean": cell["debate_override_rate"].mean(),
-                    "gini_mean": cell["reward_inequality_gini"].mean(),
+                    "mean_absolute_reward_gap_mean": cell["mean_absolute_reward_gap"].mean(),
+                    "reward_std_mean": cell["reward_std"].mean(),
+                    "reward_range_mean": cell["reward_range"].mean(),
+                    "leader_index": (
+                        cell["leader_index"].dropna().iloc[0]
+                        if "leader_index" in cell and cell["leader_index"].notna().any()
+                        else None
+                    ),
+                    "leader_name": (
+                        cell["leader_name"].dropna().iloc[0]
+                        if "leader_name" in cell and cell["leader_name"].notna().any()
+                        else None
+                    ),
+                    "leader_role": (
+                        cell["leader_role"].dropna().iloc[0]
+                        if "leader_role" in cell and cell["leader_role"].notna().any()
+                        else None
+                    ),
                 })
 
     aggregated_df = pd.DataFrame(agg_rows)

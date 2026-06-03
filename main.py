@@ -9,7 +9,7 @@ from src.coordination import (
     IndependentCoordination,
     VotingCoordination,
     AdaptiveVotingCoordination,
-    CentralizedCoordination,
+    CentralizedRoleCoordination,
     StructuredDebateCoordination,
 )
 from src.compositions import make_compositions
@@ -30,9 +30,9 @@ def main():
         IndependentCoordination(),
         VotingCoordination(),
         AdaptiveVotingCoordination(),
-        CentralizedCoordination(leader_index=1, name_suffix="_profit"),
-        CentralizedCoordination(leader_index=2, name_suffix="_sustainability"),
-        CentralizedCoordination(leader_index=4, name_suffix="_risk_averse"),
+        CentralizedRoleCoordination("profit"),
+        CentralizedRoleCoordination("sustainability"),
+        CentralizedRoleCoordination("risk_averse"),
         StructuredDebateCoordination(),
     ]
 

@@ -99,7 +99,7 @@ def plot_metrics_comparison(aggregated_df, output_path=None):
         ("average_reserve_mean", "average_reserve_std", "Average reserve"),
         ("steps_survived_mean", "steps_survived_std", "Steps survived"),
         ("average_reward_mean", "average_reward_std", "Average reward"),
-        ("reward_inequality_gini_mean", "reward_inequality_gini_std", "Gini coefficient"),
+        ("mean_absolute_reward_gap_mean", "mean_absolute_reward_gap_std", "Mean abs reward gap"),
     ]
 
     fig, axes = plt.subplots(1, len(metric_keys), figsize=(5 * len(metric_keys), 5))
@@ -256,7 +256,7 @@ def plot_metrics_by_composition(aggregated_df, output_path=None):
         ("average_reserve_mean", "average_reserve_std", "Avg reserve"),
         ("steps_survived_mean", "steps_survived_std", "Steps survived"),
         ("social_welfare_mean", "social_welfare_std", "Social welfare"),
-        ("reward_inequality_gini_mean", "reward_inequality_gini_std", "Gini"),
+        ("mean_absolute_reward_gap_mean", "mean_absolute_reward_gap_std", "Mean abs gap"),
         ("debate_override_rate_mean", "debate_override_rate_std", "Override rate"),
     ]
 

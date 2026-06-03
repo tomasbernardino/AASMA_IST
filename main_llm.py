@@ -2,13 +2,14 @@
 
 Each LLM mechanism is paired with its closest rule-based analog so we can
 claim "the LLM coordinator beats/ties/loses to the rule-based one":
-    CentralizedCoordination(profit|sustainability|risk_averse)
+    CentralizedRoleCoordination(profit|sustainability|risk_averse)
                                  <-> LLMCentralizedCoordination
     StructuredDebateCoordination <-> CrewAIDebateCoordination
-The three Centralized variants mirror main.py so the LLM CFO is compared
-against every leader archetype, not just one. Independent is the
-no-coordination baseline. Voting/AdaptiveVoting are excluded: no natural
-LLM analog and they'd pay LLM-department cost for no new insight.
+The three Centralized variants mirror main.py as role-selected leaders. If a
+composition lacks the requested leader role, that row is skipped rather than
+silently substituting a different role. Independent is the no-coordination
+baseline. Voting/AdaptiveVoting are excluded: no natural LLM analog and they'd
+pay LLM-department cost for no new insight.
 
 Multi-model: set LLM_MODELS=a,b,c to sweep models; each gets its own subdir
 under results/llm/ plus a combined comparison CSV + figure. Single-model
@@ -26,7 +27,7 @@ from src.environment import LiquidityReserveEnvironment
 from src.llm_agents import LLMDepartment
 from src.coordination import (
     IndependentCoordination,
-    CentralizedCoordination,
+    CentralizedRoleCoordination,
     StructuredDebateCoordination,
     LLMCentralizedCoordination,
 )
@@ -36,9 +37,10 @@ from src.experiment import run_experiment_sweep
 from src.plotting import plot_model_comparison
 
 
+MODELS_ENV = os.environ.get("LLM_MODELS")
 MODELS = [
     model.strip()
-    for model in os.environ.get("LLM_MODELS", get_llm_model()).split(",")
+    for model in (MODELS_ENV or get_llm_model()).split(",")
     if model.strip()
 ]
 
@@ -60,13 +62,13 @@ def make_env():
 
 
 def build_mechanisms_for_model(model):
-    # Three Centralized variants (matching main.py) so the LLM coordinator is
-    # compared against every rule-based leader archetype, not just one.
+    # Three role-selected Centralized variants (matching main.py). Unsupported
+    # role/composition pairs are skipped by the sweep runner.
     return [
         IndependentCoordination(),
-        CentralizedCoordination(leader_index=1, name_suffix="_profit"),
-        CentralizedCoordination(leader_index=2, name_suffix="_sustainability"),
-        CentralizedCoordination(leader_index=4, name_suffix="_risk_averse"),
+        CentralizedRoleCoordination("profit"),
+        CentralizedRoleCoordination("sustainability"),
+        CentralizedRoleCoordination("risk_averse"),
         StructuredDebateCoordination(),
         LLMCentralizedCoordination(model=model, temperature=TEMPERATURE),
         CrewAIDebateCoordination(

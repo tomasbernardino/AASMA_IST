@@ -55,7 +55,8 @@ HISTORY_FIGURES = [
 
 NUMERIC_COLS = [
     "final_reserve", "average_reserve", "steps_survived", "total_withdrawal",
-    "average_reward", "social_welfare", "reward_inequality_gini",
+    "average_reward", "social_welfare", "mean_absolute_reward_gap",
+    "reward_std", "reward_range",
     "total_messages", "total_rounds", "wall_time_seconds", "debate_override_rate",
 ]
 ROLE_REWARD_COLS = [
@@ -106,7 +107,7 @@ def slug(model):
 
 def run_sweep_for_model(model, max_steps, temperature):
     from src.coordination import (
-        CentralizedCoordination,
+        CentralizedRoleCoordination,
         IndependentCoordination,
         LLMCentralizedCoordination,
         StructuredDebateCoordination,
@@ -116,9 +117,9 @@ def run_sweep_for_model(model, max_steps, temperature):
 
     mechanisms = [
         IndependentCoordination(),
-        CentralizedCoordination(leader_index=1, name_suffix="_profit"),
-        CentralizedCoordination(leader_index=2, name_suffix="_sustainability"),
-        CentralizedCoordination(leader_index=4, name_suffix="_risk_averse"),
+        CentralizedRoleCoordination("profit"),
+        CentralizedRoleCoordination("sustainability"),
+        CentralizedRoleCoordination("risk_averse"),
         StructuredDebateCoordination(),
         LLMCentralizedCoordination(model=model, temperature=temperature),
         CrewAIDebateCoordination(
@@ -194,9 +195,10 @@ def main():
 
     from src.llm_client import get_llm_model
 
+    models_env = os.environ.get("LLM_MODELS")
     models = [
         m.strip()
-        for m in os.environ.get("LLM_MODELS", get_llm_model()).split(",")
+        for m in (models_env or get_llm_model()).split(",")
         if m.strip()
     ]
     max_steps = int(os.environ.get("LLM_MAX_STEPS", "20"))

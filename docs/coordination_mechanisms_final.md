@@ -68,7 +68,8 @@ def decide(self, proposals, ...):
 
 **Logic:**
 1. Count votes: `Counter(["H","H","L","M","L"]) → {H:2, L:2, M:1}`
-2. Most common wins (tie-break: first alphabetically via `most_common`)
+2. Most common wins (tie-break: first proposal encountered among tied actions,
+   matching Python `Counter.most_common`)
 3. All 5 departments execute the winner
 
 **Composition note:** With 2 profit agents always voting H, and Operations voting H when R>80, the vote is structurally 3-H vs 2-L at healthy reserves. Results may reflect composition as much as mechanism.
@@ -121,10 +122,15 @@ return [winner for _ in proposals], {"messages": 5, "rounds": 1}
 
 **Action model:** Per-dept.
 
-**Three leader variants:**
-- `centralized_profit` — leader_index=1 (Trading, role=profit)
-- `centralized_sustainability` — leader_index=2 (Compliance, role=sustainability)
-- `centralized_risk_averse` — leader_index=4 (Risk, role=risk_averse)
+**Three role-selected leader variants:**
+- `centralized_profit` — first department whose role is `profit`
+- `centralized_sustainability` — first department whose role is `sustainability`
+- `centralized_risk_averse` — first department whose role is `risk_averse`
+
+If a composition lacks the requested role, that mechanism/composition row is
+skipped rather than silently substituting another role. Result CSVs include
+`leader_index`, `leader_name`, and `leader_role` columns for centralized rows
+so the actual leader identity is explicit.
 
 **Logic:**
 1. Leader forms its own proposal from its role policy

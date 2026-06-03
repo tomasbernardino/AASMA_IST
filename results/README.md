@@ -28,12 +28,18 @@ One row per `(mechanism, composition, scale, seed)`. Canonical analysis artifact
 
 Identity columns: `mechanism`, `seed`, `composition`, `scale`.
 
+For centralized mechanisms, `leader_index`, `leader_name`, and `leader_role`
+record the actual leader used in that composition.
+
 Outcome columns (from `src/metrics.py::compute_metrics`):
 - `final_reserve`, `average_reserve` — reserve at termination, and mean over the trajectory.
 - `liquidity_crisis` (bool), `time_to_crisis` (step index or `NaN`), `steps_survived` — sustainability.
 - `total_withdrawal` — sum of withdrawals over the run.
 - `average_reward`, `social_welfare` — mean per-agent reward; sum across agents (welfare).
-- `reward_inequality_gini` — Gini across the 5 agents' total rewards. Fairness.
+- `mean_absolute_reward_gap` — mean pairwise absolute gap between departments'
+  total rewards. Lower means outcomes are closer together. This replaces Gini
+  because total rewards can be negative.
+- `reward_std`, `reward_range` — additional signed-reward dispersion metrics.
 - `reward_per_department` — dict serialised as a string, agent_name → total reward.
 - `reward_profit`, `reward_sustainability`, `reward_balanced`, `reward_risk_averse` — mean reward per role for this run (averaging across the 1–2 agents holding each role).
 - `total_messages`, `total_rounds` — coordination cost. `messages` and `rounds` are the contract every mechanism must populate.
@@ -49,7 +55,7 @@ One row per `(mechanism, composition, scale)` = 7 × 4 × 4: mean and std of eve
 
 All PNGs in this directory come from `main.py` (which calls `src/plotting.py`) and use `composition="standard"` unless noted. Mechanism rankings are what the figures are designed to expose; error bars are ±1 std across seeds.
 
-- **`metrics_comparison.png`** — Four-panel bar chart on `composition="standard", scale="standard"`: average reserve, steps survived, average reward, Gini coefficient (one bar per mechanism, error bars across seeds). The top-level "which mechanism wins on what" view.
+- **`metrics_comparison.png`** — Four-panel bar chart on `composition="standard", scale="standard"`: average reserve, steps survived, average reward, mean absolute reward gap (one bar per mechanism, error bars across seeds). The top-level "which mechanism wins on what" view.
 - **`reserve_confidence_bands.png`** — Mean reserve trajectory ± 1 std across seeds, one line per mechanism, on `composition="standard", scale="standard"`. Shows sustainability over time, not just at termination.
 - **`action_distributions.png`** — Stacked bars: proportion of `L`/`M`/`H` final actions per mechanism (pooled across all steps and seeds). Shows what coordination *actually does* to agent behaviour.
 - **`per_role_rewards.png`** — One subplot per role (profit / sustainability / balanced / risk-averse) showing mean reward by mechanism. Reveals whether a mechanism wins social welfare by helping everyone or by trading roles off.
@@ -66,7 +72,7 @@ All PNGs in this directory come from `main.py` (which calls `src/plotting.py`) a
 Written by `sensitivity_analysis.py`. Sweep shape: **7 mechanisms × 3 noise levels × 3 shock probabilities × 10 seeds = 630 runs**, standard composition only.
 
 - **`sensitivity_detailed.csv`** (630 rows + header) — One row per `(mechanism, noise, shock, seed)`. Same columns as `detailed_runs.csv` plus `recovery_noise_std`, `shock_probability`. No `scale` column (always standard).
-- **`sensitivity_aggregated.csv`** (63 rows + header) — One row per `(mechanism, noise, shock)`: `crisis_rate`, `average_reserve_mean/std`, `steps_survived_mean`, `total_withdrawal_mean`, `override_rate_mean`, `gini_mean`.
+- **`sensitivity_aggregated.csv`** (63 rows + header) — One row per `(mechanism, noise, shock)`: `crisis_rate`, `average_reserve_mean/std`, `steps_survived_mean`, `total_withdrawal_mean`, `override_rate_mean`, `mean_absolute_reward_gap_mean`, `reward_std_mean`, `reward_range_mean`.
 
 ---
 
@@ -74,7 +80,14 @@ Written by `sensitivity_analysis.py`. Sweep shape: **7 mechanisms × 3 noise lev
 
 Written by `main_llm.py`. Sweep shape per model: **1 seed × 7 mechanisms × 4 compositions = 28 runs**. Scales sweep is intentionally not run for the LLM track.
 
-The 7 mechanisms are: `independent`, `centralized_profit`, `centralized_sustainability`, `centralized_risk_averse`, `structured_debate`, `llm_centralized`, `crewai_debate`. Voting and AdaptiveVoting are excluded (no natural LLM analog).
+The role-selected centralized code now emits `centralized_profit`,
+`centralized_sustainability`, and `centralized_risk_averse`, skipping
+composition/role pairs where the leader role is absent. Existing CSVs generated
+before that change may contain `centralized_leader_idx1`,
+`centralized_leader_idx2`, and `centralized_leader_idx4`; those are fixed-index
+runs and should not be relabelled as role-selected results without rerunning.
+Voting and AdaptiveVoting are excluded from the LLM track (no natural LLM
+analog).
 
 **Single-model mode** (`LLM_MODELS` unset → script uses `LLM_MODEL`): outputs go flat into `results/llm/raw/` and `results/llm/figures/`.
 
@@ -150,4 +163,3 @@ Sweep shape per model: **2 mechanisms × 4 compositions × 1 seed = 8 runs**. St
 `FreeNegotiationCoordination` is *not* in `main_llm.py`'s mechanism set, so this script is the only place it runs. The Independent baseline here is a fresh LLM draw and is not interchangeable with `main_llm.py`'s Independent row.
 
 The runs currently on disk used `LLM_MODEL=deepseek/deepseek-v4-flash`.
-

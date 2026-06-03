@@ -1,6 +1,6 @@
 # Liquidity Commons
 
-Multi-agent simulation comparing coordination mechanisms over a shared liquidity reserve. Five departments propose Low / Medium / High withdrawal levels at each step; a coordination mechanism decides the final per-step actions. The goal is to evaluate mechanisms on sustainability (does the reserve survive?), welfare (total reward), fairness (Gini across departments), and coordination cost (messages, rounds, LLM calls).
+Multi-agent simulation comparing coordination mechanisms over a shared liquidity reserve. Five departments propose Low / Medium / High withdrawal levels at each step; a coordination mechanism decides the final per-step actions. The goal is to evaluate mechanisms on sustainability (does the reserve survive?), welfare (total reward), fairness (signed-reward dispersion across departments), and coordination cost (messages, rounds, LLM calls).
 
 ## Setup
 
@@ -81,4 +81,4 @@ Exact names live in `src/compositions.py::COMPOSITION_SPECS`.
 - `LLMCentralizedCoordination` — a CFO-style LLM allocates an action per department from all proposals + reserve state.
 - `CrewAIDebateCoordination` — N+1 CrewAI agents (one per department + a moderator) run a structured debate to produce per-department final actions.
 
-`main.py` runs the 7 rule-based mechanisms with rule-based departments. `main_llm.py` runs a paired-analog set (Independent + Centralized + StructuredDebate + LLMCentralized + CrewAIDebate) all on top of LLM departments, so the rule-based-vs-LLM comparison happens at the coordinator layer with the agent population held constant.
+`main.py` runs the rule-based mechanisms with rule-based departments. The three centralized variants select leaders by role (`centralized_profit`, `centralized_sustainability`, `centralized_risk_averse`) and skip compositions where that role is absent. `main_llm.py` runs a paired-analog set (Independent + Centralized + StructuredDebate + LLMCentralized + CrewAIDebate) all on top of LLM departments, so the rule-based-vs-LLM comparison happens at the coordinator layer with the agent population held constant.

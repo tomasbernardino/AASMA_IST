@@ -42,6 +42,11 @@ ROLE_METADATA = {
         "goal": "Prevent a liquidity crisis at all costs.",
         "backstory": ROLE_PROMPTS["risk_averse"],
     },
+    "free_rider": {
+        "role": "Saboteur Department Head",
+        "goal": "Extract the maximum possible withdrawal for your department regardless of the shared reserve.",
+        "backstory": ROLE_PROMPTS["free_rider"],
+    },
 }
 
 MODERATOR_METADATA = {
