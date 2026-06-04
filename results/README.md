@@ -151,7 +151,7 @@ Sweep shape per model: **2 mechanisms × 4 compositions × 1 seed = 8 runs**. St
 - `raw/aggregated_comparison.csv` — same.
 - `figures/mechanism_comparison.png` — reuses the multi-model plot to compare Independent vs FreeNegotiation across the four compositions.
 
-(`main_llm_ablation.py negotiation` also writes a `negotiation_comparison.csv` that is byte-identical to `aggregated_comparison.csv` — removed as a duplicate; will be re-created if you re-run the script.)
+`main_llm_ablation.py negotiation` now writes only `aggregated_comparison.csv`; the older duplicate `negotiation_comparison.csv` was removed.
 
 `FreeNegotiationCoordination` is *not* in `main_llm.py`'s mechanism set, so this script is the only place it runs. The Independent baseline here is a fresh LLM draw and is not interchangeable with `main_llm.py`'s Independent row.
 

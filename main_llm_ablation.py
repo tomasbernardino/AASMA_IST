@@ -185,9 +185,6 @@ def run_negotiation(model, max_steps):
     )
     agg_results["model"] = model
 
-    combined_path = base_dir / "raw" / "negotiation_comparison.csv"
-    agg_results.to_csv(combined_path, index=False)
-    print(f"\nWrote combined results to {combined_path} ({len(agg_results)} rows)")
 
     plot_path = base_dir / "figures" / "mechanism_comparison.png"
     try:

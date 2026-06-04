@@ -311,7 +311,7 @@ class LLMCentralizedCoordination(CoordinationMechanism):
                 ],
                 model=self.model,
                 temperature=self.temperature,
-                max_tokens=200,
+                max_tokens=512,
             )
             parsed = parse_per_dept_actions(response, dept_names)
             final_actions = [parsed[name] for name in dept_names]
