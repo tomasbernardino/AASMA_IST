@@ -441,7 +441,7 @@ def plot_cost_vs_welfare_pareto(aggregated_df, composition="standard", output_pa
         ax.grid(alpha=0.3)
 
     plt.suptitle(
-        f"Coordination cost vs benefit ({composition} composition) — "
+        f"Coordination cost vs benefit ({composition} composition) - "
         f"upper-left is best",
         fontsize=13,
     )

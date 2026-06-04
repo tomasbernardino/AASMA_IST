@@ -32,7 +32,7 @@ ROLE_PROMPTS = {
     ),
 }
 
-def build_universalization_prompt(reserve_level: float, n_departments: int, reserve_capacity: float = 100.0) -> str:
+def build_universalization_prompt(reserve_level, n_departments, reserve_capacity = 100.0):
     """Inject universalization reasoning for the GovSim-style ablation."""
     recovery = 0.3 * reserve_level * (1 - reserve_level / reserve_capacity)
     sustainable_total = recovery
@@ -54,12 +54,12 @@ def build_universalization_prompt(reserve_level: float, n_departments: int, rese
 
 
 def build_centralized_leader_prompt(
-    proposals: list[str],
-    departments: list,
-    reserve_level: float,
-    reserve_capacity: float = 100,
-    crisis_threshold: float = 5,
-) -> tuple[str, str]:
+    proposals,
+    departments,
+    reserve_level,
+    reserve_capacity = 100,
+    crisis_threshold = 5,
+):
     """Build (system, user) prompts for the CFO/treasury leader. The leader
     allocates a per-department action, not a single global one."""
     dept_names = [dept.name for dept in departments]

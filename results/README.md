@@ -1,6 +1,6 @@
 # Results
 
-Reference for everything in this directory — what each entry-point script writes and what each artifact shows.
+Reference for everything in this directory, what each entry-point script writes and what each artifact shows.
 
 Entry points that produce results:
 

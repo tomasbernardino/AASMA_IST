@@ -211,7 +211,7 @@ class CrewAIDebateCoordination(CoordinationMechanism):
                     f"In 2-3 sentences, argue WHY {proposal} is the right choice for the "
                     f"organization given the current reserve state. Be specific about the "
                     f"risk and your department's mandate.\n\n"
-                    f"For opening arguments, just state your position — do NOT delegate or "
+                    f"For opening arguments, just state your position do NOT delegate or "
                     f"consult other departments. They will hear you in due course."
                 ),
                 expected_output=(
@@ -232,7 +232,7 @@ class CrewAIDebateCoordination(CoordinationMechanism):
                     f"BEFORE writing your rebuttal, you MAY consult ONE specific department "
                     f"by delegating a single clarifying question to them (e.g. ask Risk "
                     f"Department Head what volatility threshold they consider unacceptable). "
-                    f"Use this sparingly — only if the answer would actually change your "
+                    f"Use this only if the answer would actually change your "
                     f"position. Do not delegate just to fill space.\n\n"
                     f"Then, in 2-3 sentences: (a) acknowledge the strongest counter-argument "
                     f"you heard, and (b) either defend {proposal} or update to a different "
@@ -266,8 +266,8 @@ class CrewAIDebateCoordination(CoordinationMechanism):
                 "Reserve level: {reserve_level}/100. "
                 "Crisis threshold: {crisis_threshold}.\n\n"
                 f"You MAY delegate a single clarifying question to one specific department "
-                f"if a critical point is still unclear from their arguments. Use sparingly.\n\n"
-                f"Then synthesise the arguments and rebuttals and allocate a final "
+                f"if a critical point is still unclear from their arguments.\n\n"
+                f"Then synthesize the arguments and rebuttals and allocate a final "
                 f"withdrawal level to EACH department individually. You may give "
                 f"different departments different levels.\n\n"
                 f"Output ONLY valid JSON in exactly this shape:\n"

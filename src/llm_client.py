@@ -3,20 +3,20 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Optional
+import json
 
 from dotenv import load_dotenv
 from openai import OpenAI
-import json
 
 
 load_dotenv()
 
 
-def split_llm_models(value):
+def split_llm_models(value: str) -> list[str]:
     return [model.strip() for model in value.split(",") if model.strip()]
 
 
-def get_llm_models():
+def get_llm_models() -> list[str]:
     load_dotenv()
     value = os.environ.get("LLM_MODEL")
     if not value:
@@ -27,22 +27,22 @@ def get_llm_models():
     return models
 
 
-def get_llm_model():
+def get_llm_model() -> str:
     return get_llm_models()[0]
 
 
 @dataclass
 class LLMResponse:
-    content
-    model
-    latency_ms
-    tokens = None
+    content: str
+    model: str
+    latency_ms: float
+    tokens: Optional[int] = None
 
 
 _client = None
 
 
-def get_client():
+def get_client() -> OpenAI:
     global _client
     if _client is None:
         _client = OpenAI(
@@ -53,11 +53,11 @@ def get_client():
 
 
 def call_openrouter(
-    messages,
-    model = None,
-    temperature = 0.3,
-    max_tokens = 1000,
-):
+    messages: list[dict],
+    model: str | None = None,
+    temperature: float = 0.3,
+    max_tokens: int = 1000,
+) -> LLMResponse:
     start_time = time.perf_counter()
 
     client = get_client()
@@ -81,7 +81,7 @@ def call_openrouter(
     )
 
 
-def parse_action(response):
+def parse_action(response: LLMResponse) -> str:
     """Extract L/M/H from the response; fall back to 'M' on any failure."""
     if not response.content:
         return "M"
@@ -98,7 +98,7 @@ def parse_action(response):
     return matches[-1] if matches else "M"
 
 
-def parse_json_action(response):
+def parse_json_action(response: LLMResponse) -> dict:
     """Parse {action, reason} JSON; fall back to {'M', 'parse_failed'}."""
 
     if not response.content:
@@ -122,7 +122,11 @@ def parse_json_action(response):
     return {"action": "M", "reason": "parse_failed"}
 
 
-def parse_per_dept_actions(response, dept_names, fallback = "M"):
+def parse_per_dept_actions(
+    response: LLMResponse,
+    dept_names: list[str],
+    fallback: str = "M",
+) -> dict:
     """Parse per-department action JSON ({dept_name: "L|M|H", ..., reason})."""
 
     result = {name: fallback for name in dept_names}
