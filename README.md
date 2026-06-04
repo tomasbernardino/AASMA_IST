@@ -4,67 +4,86 @@ Multi-agent simulation comparing coordination mechanisms over a shared liquidity
 
 ## Setup
 
-CrewAI requires Python `>=3.10,<3.14`; the project pins `>=3.11` for NumPy compatibility. With `uv`:
+Use Python `>=3.11,<3.14`. The project supports either `uv` or a standard virtual environment.
+
+With `uv`:
 
 ```bash
 uv python install 3.12
 uv sync
 ```
 
-Or with pip:
+Run commands through `uv run`, for example:
 
 ```bash
+uv run python main.py
+```
+
+Or with `pip`:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Then create a `.env` (see `env.example`):
+The rule-based experiments do not need an API key. For LLM experiments, copy `.env.example` to `.env` and set an OpenRouter key:
+
+```bash
+cp .env.example .env
+```
+
+Minimum `.env` for LLM runs:
 
 ```env
 OPENROUTER_API_KEY=sk-or-your-key-here
 LLM_MODEL=deepseek/deepseek-v4-flash
-SMOKE_MODEL=deepseek/deepseek-v4-flash
-SMOKE_STEPS=1
-LLM_MAX_STEPS=20
 ```
 
-Only `OPENROUTER_API_KEY` and `LLM_MODEL` are required for the LLM track; the others have sensible defaults.
+Optional step-count settings are documented in `.env.example`.
 
 ## Running
 
+Use `python ...` below when your virtual environment is active. If you installed with `uv`, prefix commands with `uv run`, for example `uv run python main.py`.
+
 ```bash
-# Rule-based baseline (no API key needed) — sweeps mechanisms × compositions × scales × seeds
+# Rule-based baseline; no API key needed.
+# Sweeps mechanisms x compositions x withdrawal scales x seeds.
 python main.py
 
-# Environment sensitivity — 3×3 grid of (recovery_noise_std × shock_probability)
+# Environmental sensitivity; no API key needed.
+# Runs a 3 x 3 grid of recovery noise x shock probability.
 python sensitivity_analysis.py
 
-# LLM smoke test — cheap, ~10 steps, sanity-checks the LLM coordination mechanisms
+# Quick LLM check for partners; requires OPENROUTER_API_KEY and LLM_MODEL.
+# Runs one step through the LLM centralized and CrewAI debate coordinators.
 python smoke_test_llm.py
 
-# LLM track — single model with LLM_MODEL set
+# Main LLM track; requires OPENROUTER_API_KEY and LLM_MODEL.
 python main_llm.py
 
-# LLM track — multi-model comparison
-LLM_MODELS=openai/gpt-4o-mini,anthropic/claude-haiku-4-5,deepseek/deepseek-v4-flash python main_llm.py
+# Multi-model LLM comparison.
+# main_llm.py treats comma-separated LLM_MODEL values as a model sweep.
+LLM_MODEL=openai/gpt-4o-mini,anthropic/claude-haiku-4-5,deepseek/deepseek-v4-flash python main_llm.py
 
-# Memory ablation — varies memory_window (1 vs 5) for the LLM mechanisms
-python main_llm_memory_ablation.py
-
-# Cheap smoke for any LLM run
-SMOKE=1 python main_llm.py
+# Controlled LLM side experiments.
+python main_llm_ablation.py memory
+python main_llm_ablation.py universalization
+python main_llm_ablation.py negotiation
 ```
 
-All entry points write CSVs to `results/raw/` (or `results/llm/`, `results/llm_memory/`) and PNGs to `results/figures/`. See `results/README.md` for what each file shows.
+Outputs are written under `results/`: rule-based CSVs in `results/raw/`, LLM CSVs in `results/llm/`, side-experiment outputs in their matching subdirectories, and figures under `results/**/figures/`. See `results/README.md` for artifact details.
 
 ## Departments and compositions
 
-Three role mixes, each with 5 departments. Roles drive both the rule-based agents' deterministic policies in `src/agents.py` and the LLM agents' system prompts in `src/prompts.py::ROLE_PROMPTS`.
+Four role mixes, each with 5 departments. Roles drive both the rule-based agents' deterministic policies in `src/agents.py` and the LLM agents' system prompts in `src/prompts.py::ROLE_PROMPTS`.
 
-| Composition  | profit × | sustainability × | balanced × | risk_averse × |
-|--------------|----------|------------------|------------|---------------|
-| standard     | 2        | 1                | 1          | 1             |
-| aggressive   | 3        | 0                | 1          | 1             |
-| conservative | 1        | 2                | 1          | 1             |
+| Composition  | profit × | sustainability × | balanced × | risk_averse × | free_rider × |
+|--------------|----------|------------------|------------|---------------|--------------|
+| standard     | 2        | 1                | 1          | 1             | 0            |
+| aggressive   | 3        | 0                | 1          | 1             | 0            |
+| conservative | 1        | 2                | 1          | 1             | 0            |
+| free_rider   | 2        | 1                | 1          | 0             | 1            |
 
 Exact names live in `src/compositions.py::COMPOSITION_SPECS`.
 

@@ -1,16 +1,8 @@
-# src/metrics.py
-
 import numpy as np
 
 
 def mean_absolute_gap(values):
-    """
-    Mean pairwise absolute reward gap.
-
-    Unlike standard Gini, this is valid for signed utilities, which this
-    project uses because crisis/risk penalties can make rewards negative.
-    Lower values mean department outcomes are closer together.
-    """
+    """Mean pairwise absolute reward gap, valid for signed utilities."""
     values = np.array(values, dtype=float)
     if len(values) <= 1:
         return 0.0
@@ -19,16 +11,12 @@ def mean_absolute_gap(values):
 
 
 def compute_metrics(history, departments, max_steps=100, wall_time_seconds=None, seed=None):
-    """
-    Compute summary metrics for one simulation run.
-    """
-    # Reserve metrics capture the system-level sustainability outcome.
+    """Compute summary metrics for one simulation run."""
     reserves = [step["new_reserve"] for step in history]
     total_withdrawals = [step["total_withdrawal"] for step in history]
 
     crisis = any(step["crisis"] for step in history)
 
-    # Time to crisis is only defined when the reserve crosses the crisis threshold.
     if crisis:
         time_to_crisis = next(
             step["t"] for step in history if step["crisis"]
@@ -39,11 +27,9 @@ def compute_metrics(history, departments, max_steps=100, wall_time_seconds=None,
     final_reserve = reserves[-1] if reserves else None
     average_reserve = float(np.mean(reserves)) if reserves else 0.0
 
-    # Department rewards are used for efficiency and fairness comparisons.
     total_reward_per_department = [department.total_reward for department in departments]
     reward_array = np.array(total_reward_per_department, dtype=float)
 
-    # Message and round counts approximate the cost of coordination.
     total_messages = sum(step["messages"] for step in history)
     total_rounds = sum(step["rounds"] for step in history)
 
@@ -82,10 +68,7 @@ def compute_metrics(history, departments, max_steps=100, wall_time_seconds=None,
             if value not in (None, ""):
                 metrics[key] = value
 
-    # Per-role mean reward. Lets the report make claims like "mechanism X
-    # helps role Y at role Z's expense", which is more honest than
-    # social_welfare (a sum across roles whose utility functions are on
-    # different scales — see src/agents.py::receive_reward).
+    # Per-role rewards expose trade-offs hidden by aggregate social welfare.
     role_rewards = {}
     for dept in departments:
         role_rewards.setdefault(dept.role, []).append(dept.total_reward)
@@ -99,7 +82,6 @@ def compute_metrics(history, departments, max_steps=100, wall_time_seconds=None,
         metrics["llm_calls"] = llm_calls
         metrics["llm_total_latency_ms"] = llm_latency
         metrics["llm_avg_latency_ms"] = llm_latency / llm_calls
-        # Model is constant per mechanism run; take the first non-empty value.
         models = [m for m in (step.get("model", "") for step in history) if m]
         if models:
             metrics["model"] = models[0]

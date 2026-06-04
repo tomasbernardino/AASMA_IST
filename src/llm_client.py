@@ -6,39 +6,43 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from openai import OpenAI
+import json
 
 
 load_dotenv()
 
 
-def get_llm_model(*env_names):
-    """Return the configured LLM model, checking `env_names` in order then
-    falling back to ``LLM_MODEL``. Re-runs ``load_dotenv`` so callers that
-    didn't load .env at import time still pick it up."""
+def split_llm_models(value):
+    return [model.strip() for model in value.split(",") if model.strip()]
+
+
+def get_llm_models():
     load_dotenv()
-    for env_name in env_names:
-        value = os.environ.get(env_name)
-        if value:
-            return value
     value = os.environ.get("LLM_MODEL")
-    if value:
-        return value
-    checked = ", ".join((*env_names, "LLM_MODEL")) or "LLM_MODEL"
-    raise ValueError(f"Set one of these environment variables first: {checked}.")
+    if not value:
+        raise ValueError("Set LLM_MODEL first.")
+    models = split_llm_models(value)
+    if not models:
+        raise ValueError("LLM_MODEL must contain at least one model name.")
+    return models
+
+
+def get_llm_model():
+    return get_llm_models()[0]
 
 
 @dataclass
 class LLMResponse:
-    content: str
-    model: str
-    latency_ms: float
-    tokens: Optional[int] = None
+    content
+    model
+    latency_ms
+    tokens = None
 
 
 _client = None
 
 
-def get_client() -> OpenAI:
+def get_client():
     global _client
     if _client is None:
         _client = OpenAI(
@@ -49,11 +53,11 @@ def get_client() -> OpenAI:
 
 
 def call_openrouter(
-    messages: list[dict],
-    model: str | None = None,
-    temperature: float = 0.3,
-    max_tokens: int = 1000,
-) -> LLMResponse:
+    messages,
+    model = None,
+    temperature = 0.3,
+    max_tokens = 1000,
+):
     start_time = time.perf_counter()
 
     client = get_client()
@@ -77,7 +81,7 @@ def call_openrouter(
     )
 
 
-def parse_action(response: LLMResponse) -> str:
+def parse_action(response):
     """Extract L/M/H from the response; fall back to 'M' on any failure."""
     if not response.content:
         return "M"
@@ -94,9 +98,8 @@ def parse_action(response: LLMResponse) -> str:
     return matches[-1] if matches else "M"
 
 
-def parse_json_action(response: LLMResponse) -> dict:
+def parse_json_action(response):
     """Parse {action, reason} JSON; fall back to {'M', 'parse_failed'}."""
-    import json
 
     if not response.content:
         return {"action": "M", "reason": "parse_failed"}
@@ -119,10 +122,8 @@ def parse_json_action(response: LLMResponse) -> dict:
     return {"action": "M", "reason": "parse_failed"}
 
 
-def parse_per_dept_actions(response: LLMResponse, dept_names: list[str], fallback: str = "M") -> dict:
-    """Parse per-department action JSON ({dept_name: "L|M|H", ..., reason}).
-    On failure, apply `fallback` to every department."""
-    import json
+def parse_per_dept_actions(response, dept_names, fallback = "M"):
+    """Parse per-department action JSON ({dept_name: "L|M|H", ..., reason})."""
 
     result = {name: fallback for name in dept_names}
     result["reason"] = "parse_failed"

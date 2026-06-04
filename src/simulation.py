@@ -18,35 +18,14 @@ def run_simulation(
     seed=None,
     action_to_withdrawal=None,
 ):
-    """
-    Run one simulation episode.
-
-    Parameters:
-        environment: LiquidityReserveEnvironment
-        departments: list of Department objects
-        coordination: coordination mechanism object
-        max_steps: number of time steps
-        seed: optional integer seed for reproducibility
-        action_to_withdrawal: optional mapping {"L": x, "M": y, "H": z}.
-            Defaults to ACTION_TO_WITHDRAWAL. Lets callers sweep alternative
-            withdrawal scales without monkey-patching.
-
-    Returns:
-        history: list of dictionaries with all relevant data
-        elapsed_seconds: wall-clock time of the simulation
-    """
+    """Run one simulation episode and return per-step history plus elapsed time."""
     if action_to_withdrawal is None:
         action_to_withdrawal = ACTION_TO_WITHDRAWAL
-    # Seed the environment random generator for reproducibility.
     if seed is not None:
         environment.rng = np.random.default_rng(seed)
 
     start_time = time.perf_counter()
 
-    # Reset environment, departments, and the coordination mechanism.
-    # Resetting the coordination mechanism clears any cross-step memory it
-    # carries (e.g. CrewAIDebate's debate log) so different seeds are
-    # actually independent.
     reserve = environment.reset()
 
     for i, department in enumerate(departments):
@@ -58,7 +37,6 @@ def run_simulation(
     history = []
 
     for t in range(max_steps):
-        # Departments observe the reserve and propose spending policies.
         proposals = [
             department.propose_action(reserve)
             for department in departments
@@ -77,7 +55,6 @@ def run_simulation(
             if getattr(department, "last_llm_model", "")
         ]
 
-        # Coordination mechanism decides final spending policies.
         final_actions, coordination_cost = coordination.decide(
             proposals=proposals,
             reserve_level=reserve,
@@ -86,16 +63,13 @@ def run_simulation(
 
         justifications = coordination_cost.get("justifications")
 
-        # Convert policies into actual withdrawal values.
         withdrawals = [
             action_to_withdrawal[action]
             for action in final_actions
         ]
 
-        # Update environment
         new_reserve, crisis = environment.step(withdrawals)
 
-        # Give rewards to departments based on their withdrawals and the new state.
         rewards = []
         for department, withdrawal in zip(departments, withdrawals):
             reward = department.receive_reward(
@@ -105,7 +79,6 @@ def run_simulation(
             )
             rewards.append(reward)
 
-        # Store everything important for analysis
         step_record = {
             "t": t,
             "reserve": reserve,
@@ -141,7 +114,6 @@ def run_simulation(
 
         history.append(step_record)
 
-        # Move to next state
         reserve = new_reserve
 
         if crisis:

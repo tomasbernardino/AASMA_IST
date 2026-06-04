@@ -3,8 +3,7 @@ Shared experiment sweep runner.
 
 Both main.py (rule-based) and main_llm.py (LLM-based) sweep the same
 Cartesian product of (scale x composition x mechanism x seed), aggregate the
-same way, and produce the same plots. This module owns that pipeline so the
-entry points can stay thin.
+same way, and produce the same plots.
 """
 
 from pathlib import Path
@@ -28,8 +27,6 @@ from src.plotting import (
 DEFAULT_SCALES = {"standard": ACTION_TO_WITHDRAWAL}
 
 # Multi-scale registry for the rule-based scale-robustness experiment.
-# `standard` matches the runtime default; the others widen / asymmetrize /
-# compress the L→M→H spread to test whether mechanism rankings hold up.
 SCALES = {
     "standard":   ACTION_TO_WITHDRAWAL,
     "wide":       {"L": 1.0, "M": 3.0, "H": 5.0},
@@ -44,9 +41,6 @@ NUMERIC_COLS = [
     "total_messages", "total_rounds", "wall_time_seconds", "debate_override_rate",
 ]
 
-# Per-role reward columns, surfaced by metrics.py from each composition. Not
-# every composition contains every role (e.g. "aggressive" has no sustainability
-# member), so missing roles simply produce NaN in the aggregation.
 ROLE_REWARD_COLS = [
     "reward_profit", "reward_sustainability", "reward_balanced", "reward_risk_averse",
 ]
@@ -65,31 +59,6 @@ def run_experiment_sweep(
     scales=None,
     progress=False,
 ):
-    """
-    Run a full sweep and produce CSVs + figures.
-
-    Parameters
-    ----------
-    coordination_mechanisms : list[CoordinationMechanism]
-    compositions : dict[str, callable]
-        Maps composition name to a factory returning a fresh list of departments.
-    env_factory : callable
-        Zero-arg callable returning a fresh LiquidityReserveEnvironment.
-    n_seeds : int
-    max_steps : int
-    output_dir : str | Path
-        Directory under which `raw/` (CSVs) and `figures/` (PNGs) are written.
-    scales : dict[str, dict[str, float]] | None
-        Maps scale name to {"L": x, "M": y, "H": z}. Defaults to a single
-        "standard" scale of {1, 2, 3}. The legacy single-scale plots are fed
-        the scale-"standard" slice so they remain meaningful.
-    progress : bool
-        If True, prints a one-line update per run (useful for slow LLM sweeps).
-
-    Returns
-    -------
-    aggregated_df : pandas.DataFrame
-    """
     scales = scales or DEFAULT_SCALES
     sweep_scales = len(scales) > 1
 
@@ -99,8 +68,7 @@ def run_experiment_sweep(
     raw_dir.mkdir(parents=True, exist_ok=True)
     fig_dir.mkdir(parents=True, exist_ok=True)
 
-    # Single-scale histories (standard scale only) feed the time-series plots,
-    # which were designed before the scale dimension existed.
+    # Time-series plots use standard-scale histories.
     all_histories = {}
     all_metrics = []
 

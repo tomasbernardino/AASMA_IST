@@ -5,94 +5,41 @@ claim "the LLM coordinator beats/ties/loses to the rule-based one":
     CentralizedRoleCoordination(profit|sustainability|risk_averse)
                                  <-> LLMCentralizedCoordination
     StructuredDebateCoordination <-> CrewAIDebateCoordination
-The three Centralized variants mirror main.py as role-selected leaders. If a
-composition lacks the requested leader role, that row is skipped rather than
-silently substituting a different role. Independent is the no-coordination
-baseline. Voting/AdaptiveVoting are excluded: no natural LLM analog and they'd
-pay LLM-department cost for no new insight.
-
-Multi-model: set LLM_MODELS=a,b,c to sweep models; each gets its own subdir
-under results/llm/ plus a combined comparison CSV + figure. Single-model
-mode (LLM_MODELS unset) writes flat to results/llm/.
 """
 
 import os
-import sys
 from pathlib import Path
 
 import pandas as pd
 
-from src.llm_client import get_llm_model
-from src.environment import LiquidityReserveEnvironment
+from src.llm_client import get_llm_models
 from src.llm_agents import LLMDepartment
-from src.coordination import (
-    IndependentCoordination,
-    CentralizedRoleCoordination,
-    StructuredDebateCoordination,
-    LLMCentralizedCoordination,
-)
-from src.crewai_coordination import CrewAIDebateCoordination
 from src.compositions import make_compositions
 from src.experiment import run_experiment_sweep
 from src.plotting import plot_model_comparison
+from src.study_config import (
+    DEFAULT_TEMPERATURE,
+    build_llm_mechanisms,
+    make_default_env,
+    model_slug,
+    require_openrouter_key,
+)
 
 
-MODELS_ENV = os.environ.get("LLM_MODELS")
-MODELS = [
-    model.strip()
-    for model in (MODELS_ENV or get_llm_model()).split(",")
-    if model.strip()
-]
-
-TEMPERATURE = 0.3
+MODELS = get_llm_models()
 MAX_STEPS = int(os.environ.get("LLM_MAX_STEPS", "20"))
-SMOKE = bool(os.environ.get("SMOKE"))
-
-
-def slug(model_name):
-    return model_name.replace("/", "_").replace(":", "-")
-
-
-def make_env():
-    return LiquidityReserveEnvironment(
-        recovery_noise_std=0.05,
-        shock_probability=0.05,
-        shock_magnitude=10.0,
-    )
-
-
-def build_mechanisms_for_model(model):
-    # Three role-selected Centralized variants (matching main.py). Unsupported
-    # role/composition pairs are skipped by the sweep runner.
-    return [
-        IndependentCoordination(),
-        CentralizedRoleCoordination("profit"),
-        CentralizedRoleCoordination("sustainability"),
-        CentralizedRoleCoordination("risk_averse"),
-        StructuredDebateCoordination(),
-        LLMCentralizedCoordination(model=model, temperature=TEMPERATURE),
-        CrewAIDebateCoordination(
-            model=model,
-            temperature=TEMPERATURE,
-            allow_delegation=False,
-        ),
-    ]
 
 
 def main():
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        print("ERROR: set OPENROUTER_API_KEY before running.", file=sys.stderr)
-        sys.exit(1)
+    require_openrouter_key()
 
     multi_model = len(MODELS) > 1
-    max_steps = min(MAX_STEPS, 2) if SMOKE else MAX_STEPS
     base_dir = Path("results/llm")
     base_dir.mkdir(parents=True, exist_ok=True)
 
     print(
         f"Running LLM sweep: {len(MODELS)} model{'s' if multi_model else ''}, "
-        f"max_steps={max_steps}"
-        + ("  (SMOKE mode)" if SMOKE else "")
+        f"max_steps={MAX_STEPS}"
     )
 
     per_model_dfs = []
@@ -103,20 +50,17 @@ def main():
             print('=' * 78)
 
         compositions = make_compositions(
-            LLMDepartment, model=model, temperature=TEMPERATURE,
+            LLMDepartment, model=model, temperature=DEFAULT_TEMPERATURE,
         )
-        if SMOKE:
-            compositions = {"standard": compositions["standard"]}
-
-        mechanisms = build_mechanisms_for_model(model)
-
-        run_dir = base_dir / slug(model) if multi_model else base_dir
+        run_dir = base_dir / model_slug(model) if multi_model else base_dir
         agg = run_experiment_sweep(
-            coordination_mechanisms=mechanisms,
+            coordination_mechanisms=build_llm_mechanisms(
+                model, temperature=DEFAULT_TEMPERATURE,
+            ),
             compositions=compositions,
-            env_factory=make_env,
+            env_factory=make_default_env,
             n_seeds=1,
-            max_steps=max_steps,
+            max_steps=MAX_STEPS,
             output_dir=str(run_dir),
             scales=None,
             progress=True,

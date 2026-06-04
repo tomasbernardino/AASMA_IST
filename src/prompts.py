@@ -1,10 +1,7 @@
 """Prompt material shared across the LLM coordination paths."""
 
 
-# Source of truth for per-role personas (consumed by LLMDepartment and by
-# ROLE_METADATA in src/crewai_coordination.py). Wording must stay aligned
-# with the rule-based policies in src/agents.py to keep the LLM-vs-rule-based
-# comparison apples-to-apples.
+# Keep role personas aligned with the rule-based policies in src/agents.py.
 ROLE_PROMPTS = {
     "profit": (
         "You are the Growth Department. Your priority is aggressive investment "
@@ -36,8 +33,7 @@ ROLE_PROMPTS = {
 }
 
 def build_universalization_prompt(reserve_level: float, n_departments: int, reserve_capacity: float = 100.0) -> str:
-    """Inject Kantian universalization reasoning based on GovSim paper."""
-    # Rough estimate of recovery: 30% of current level * capacity factor
+    """Inject universalization reasoning for the GovSim-style ablation."""
     recovery = 0.3 * reserve_level * (1 - reserve_level / reserve_capacity)
     sustainable_total = recovery
     sustainable_per_dept = sustainable_total / n_departments

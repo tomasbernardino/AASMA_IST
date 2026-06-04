@@ -1,67 +1,40 @@
-# src/plotting.py
-
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-def plot_liquidity_histories(histories_by_mechanism, output_path=None):
-    """
-    Plot liquidity reserve level over time for several mechanisms.
+COLOR_PALETTE = [
+    "#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de",
+    "#3ba272", "#fc8452", "#9a60b4", "#ea7ccc",
+]
+ACTION_COLORS = ["#4caf50", "#ff9800", "#f44336"]
 
-    histories_by_mechanism:
-        dictionary where:
-            key = mechanism name
-            value = simulation history
-    """
 
-    plt.figure(figsize=(10, 6))
-
-    for mechanism_name, history in histories_by_mechanism.items():
-        timesteps = [step["t"] for step in history]
+def _reserve_matrix(histories_list, max_steps):
+    rows = []
+    for history in histories_list:
         reserves = [step["new_reserve"] for step in history]
+        last_value = reserves[-1] if reserves else 0
+        rows.append(reserves + [last_value] * (max_steps - len(reserves)))
+    return np.array(rows)
 
-        plt.plot(timesteps, reserves, label=mechanism_name)
 
-    plt.xlabel("Time step")
-    plt.ylabel("Liquidity reserve level")
-    plt.title("Liquidity reserve sustainability by coordination mechanism")
-    plt.legend()
-    plt.grid(True)
-
+def _save_current_figure(output_path, dpi=None):
     if output_path:
-        plt.savefig(output_path, bbox_inches="tight")
-
+        kwargs = {"bbox_inches": "tight"}
+        if dpi is not None:
+            kwargs["dpi"] = dpi
+        plt.savefig(output_path, **kwargs)
     plt.close()
 
 
 def plot_liquidity_confidence_bands(all_histories_by_mechanism, max_steps, output_path=None):
-    """
-    Plot mean reserve trajectory with shaded confidence bands (± 1 std)
-    across multiple seeds for each mechanism.
-
-    all_histories_by_mechanism:
-        dictionary where:
-            key = mechanism name
-            value = list of histories (one per seed)
-
-    max_steps:
-        Maximum number of time steps (used to align trajectories).
-    """
 
     plt.figure(figsize=(10, 6))
 
     for mechanism_name, histories_list in all_histories_by_mechanism.items():
-        # Pad shorter histories to max_steps using their last reserve value.
-        reserves_matrix = []
-        for history in histories_list:
-            reserves = [step["new_reserve"] for step in history]
-            last_value = reserves[-1] if reserves else 0
-            padded = reserves + [last_value] * (max_steps - len(reserves))
-            reserves_matrix.append(padded)
-
-        reserves_matrix = np.array(reserves_matrix)
+        reserves_matrix = _reserve_matrix(histories_list, max_steps)
         mean_reserves = np.mean(reserves_matrix, axis=0)
         std_reserves = np.std(reserves_matrix, axis=0)
         timesteps = np.arange(max_steps)
@@ -80,20 +53,10 @@ def plot_liquidity_confidence_bands(all_histories_by_mechanism, max_steps, outpu
     plt.legend()
     plt.grid(True)
 
-    if output_path:
-        plt.savefig(output_path, bbox_inches="tight")
-
-    plt.close()
+    _save_current_figure(output_path)
 
 
 def plot_metrics_comparison(aggregated_df, output_path=None):
-    """
-    Bar chart comparing key metrics across mechanisms, with error bars.
-
-    aggregated_df:
-        DataFrame with columns: mechanism, metric_name_mean, metric_name_std
-        (one row per mechanism).
-    """
 
     metric_keys = [
         ("average_reserve_mean", "average_reserve_std", "Average reserve"),
@@ -120,22 +83,10 @@ def plot_metrics_comparison(aggregated_df, output_path=None):
     plt.suptitle("Metric comparison by coordination mechanism", fontsize=13)
     plt.tight_layout()
 
-    if output_path:
-        plt.savefig(output_path, bbox_inches="tight")
-
-    plt.close()
+    _save_current_figure(output_path)
 
 
 def plot_action_distributions(all_histories_by_mechanism, output_path=None):
-    """
-    Stacked bar chart showing the proportion of L / M / H actions
-    for each coordination mechanism (aggregated across all seeds and steps).
-
-    all_histories_by_mechanism:
-        dictionary where:
-            key = mechanism name
-            value = list of histories (one per seed)
-    """
 
     action_labels = ["L", "M", "H"]
     mechanism_names = list(all_histories_by_mechanism.keys())
@@ -144,7 +95,6 @@ def plot_action_distributions(all_histories_by_mechanism, output_path=None):
     for mechanism_name in mechanism_names:
         histories_list = all_histories_by_mechanism[mechanism_name]
 
-        # Count all final actions across all seeds and all steps.
         counts = {"L": 0, "M": 0, "H": 0}
         total = 0
         for history in histories_list:
@@ -162,9 +112,7 @@ def plot_action_distributions(all_histories_by_mechanism, output_path=None):
     fig, ax = plt.subplots(figsize=(8, 5))
 
     bottom = np.zeros(len(mechanism_names))
-    colors = ["#4caf50", "#ff9800", "#f44336"]  # green, orange, red
-
-    for label, color in zip(action_labels, colors):
+    for label, color in zip(action_labels, ACTION_COLORS):
         values = np.array(proportions[label])
         ax.bar(x, values, width, bottom=bottom, label=label, color=color, alpha=0.85)
         bottom += values
@@ -178,24 +126,10 @@ def plot_action_distributions(all_histories_by_mechanism, output_path=None):
 
     plt.tight_layout()
 
-    if output_path:
-        plt.savefig(output_path, bbox_inches="tight")
-
-    plt.close()
+    _save_current_figure(output_path)
 
 
 def plot_reserve_by_composition(all_histories_by_mechanism, max_steps, output_path=None):
-    """
-    Plot mean reserve trajectories grouped by composition.
-
-    Produces one subplot per composition (e.g. standard, aggressive,
-    conservative), each showing all mechanisms overlaid with confidence
-    bands.
-
-    Keys in all_histories_by_mechanism must be formatted as
-    "composition/mechanism".
-    """
-    # Group keys by composition.
     compositions = {}
     for key in all_histories_by_mechanism:
         if "/" not in key:
@@ -215,14 +149,7 @@ def plot_reserve_by_composition(all_histories_by_mechanism, max_steps, output_pa
             mech_name = key.split("/", 1)[1]
             histories_list = all_histories_by_mechanism[key]
 
-            reserves_matrix = []
-            for history in histories_list:
-                reserves = [step["new_reserve"] for step in history]
-                last_value = reserves[-1] if reserves else 0
-                padded = reserves + [last_value] * (max_steps - len(reserves))
-                reserves_matrix.append(padded)
-
-            reserves_matrix = np.array(reserves_matrix)
+            reserves_matrix = _reserve_matrix(histories_list, max_steps)
             mean_r = np.mean(reserves_matrix, axis=0)
             std_r = np.std(reserves_matrix, axis=0)
             timesteps = np.arange(max_steps)
@@ -239,19 +166,10 @@ def plot_reserve_by_composition(all_histories_by_mechanism, max_steps, output_pa
     plt.suptitle("Reserve trajectory by composition (mean ± 1 std)", fontsize=14)
     plt.tight_layout()
 
-    if output_path:
-        plt.savefig(output_path, bbox_inches="tight", dpi=150)
-
-    plt.close()
+    _save_current_figure(output_path, dpi=150)
 
 
 def plot_metrics_by_composition(aggregated_df, output_path=None):
-    """
-    Bar chart comparing key metrics across mechanisms, with one row of
-    subplots per composition.
-
-    aggregated_df must contain a 'composition' column.
-    """
     metric_keys = [
         ("average_reserve_mean", "average_reserve_std", "Avg reserve"),
         ("steps_survived_mean", "steps_survived_std", "Steps survived"),
@@ -273,7 +191,7 @@ def plot_metrics_by_composition(aggregated_df, output_path=None):
         squeeze=False,
     )
 
-    colors = ["#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de", "#3ba272", "#fc8452"]
+    colors = COLOR_PALETTE
 
     for row, comp_name in enumerate(compositions):
         comp_df = aggregated_df[aggregated_df["composition"] == comp_name]
@@ -299,10 +217,7 @@ def plot_metrics_by_composition(aggregated_df, output_path=None):
     plt.suptitle("Metrics comparison by composition and mechanism", fontsize=14)
     plt.tight_layout()
 
-    if output_path:
-        plt.savefig(output_path, bbox_inches="tight", dpi=150)
-
-    plt.close()
+    _save_current_figure(output_path, dpi=150)
 
 
 def plot_sensitivity_heatmap(
@@ -313,9 +228,6 @@ def plot_sensitivity_heatmap(
     """
     One heatmap per mechanism, showing how `value_col` varies across the
     environmental sensitivity grid (recovery_noise_std × shock_probability).
-
-    aggregated_df must have columns: mechanism, recovery_noise_std,
-    shock_probability, and `value_col`.
     """
     required = {"mechanism", "recovery_noise_std", "shock_probability", value_col}
     if not required.issubset(aggregated_df.columns):
@@ -374,18 +286,13 @@ def plot_sensitivity_heatmap(
     if last_im is not None:
         fig.colorbar(last_im, ax=axes.ravel().tolist(), shrink=0.6, label=value_col)
 
-    if output_path:
-        plt.savefig(output_path, bbox_inches="tight", dpi=150)
-
-    plt.close()
+    _save_current_figure(output_path, dpi=150)
 
 
 def plot_model_comparison(aggregated_df, composition="standard", output_path=None):
     """Three-panel grouped-bar comparison across (mechanism x model):
     crisis rate, social welfare, mean LLM latency per call.
 
-    Rows with a null/empty `model` are dropped — those are rule-based
-    mechanisms with no model dimension to compare across.
     """
     if "model" not in aggregated_df.columns or "composition" not in aggregated_df.columns:
         return
@@ -415,8 +322,7 @@ def plot_model_comparison(aggregated_df, composition="standard", output_path=Non
     if len(metric_specs) == 1:
         axes = [axes]
 
-    colors = ["#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de",
-              "#3ba272", "#fc8452"]
+    colors = COLOR_PALETTE
     bar_width = 0.8 / max(len(models), 1)
     x = np.arange(len(mechanisms))
 
@@ -457,10 +363,7 @@ def plot_model_comparison(aggregated_df, composition="standard", output_path=Non
     )
     plt.tight_layout()
 
-    if output_path:
-        plt.savefig(output_path, bbox_inches="tight", dpi=150)
-
-    plt.close()
+    _save_current_figure(output_path, dpi=150)
 
 
 def plot_cost_vs_welfare_pareto(aggregated_df, composition="standard", output_path=None):
@@ -469,14 +372,6 @@ def plot_cost_vs_welfare_pareto(aggregated_df, composition="standard", output_pa
 
     Left panel:  cost (total_messages) vs social welfare.
     Right panel: cost (total_messages) vs crisis avoidance (1 - crisis_rate).
-
-    A mechanism is Pareto-dominated if some other mechanism is cheaper AND
-    better on the same axis. The Pareto frontier is drawn as a polyline
-    through non-dominated points.
-
-    For LLM-heavy runs prefer `cost_col="llm_calls_mean"` (passed via
-    aggregated_df produced by the LLM sweep) so the cost reflects what
-    actually matters there. Falls back to total_messages_mean.
     """
     if "composition" not in aggregated_df.columns:
         return
@@ -500,8 +395,7 @@ def plot_cost_vs_welfare_pareto(aggregated_df, composition="standard", output_pa
     ]
 
     fig, axes = plt.subplots(1, 2, figsize=(13, 5.5))
-    colors = ["#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de",
-              "#3ba272", "#fc8452", "#9a60b4", "#ea7ccc"]
+    colors = COLOR_PALETTE
     mechanisms = list(dict.fromkeys(df["mechanism"].tolist()))
 
     for ax, (y_col, y_err_col, y_label) in zip(axes, panels):
@@ -529,7 +423,6 @@ def plot_cost_vs_welfare_pareto(aggregated_df, composition="standard", output_pa
                 fontsize=8, color="black",
             )
 
-        # Pareto frontier: lower x is better, higher y is better.
         order = np.argsort(x)
         front_x, front_y = [], []
         best_y = -np.inf
@@ -554,22 +447,13 @@ def plot_cost_vs_welfare_pareto(aggregated_df, composition="standard", output_pa
     )
     plt.tight_layout()
 
-    if output_path:
-        plt.savefig(output_path, bbox_inches="tight", dpi=150)
-
-    plt.close()
+    _save_current_figure(output_path, dpi=150)
 
 
 def plot_per_role_rewards(aggregated_df, composition="standard", output_path=None):
     """
     One subplot per role showing mean reward per mechanism on the chosen
-    composition. The point of this view: social_welfare (a sum across roles
-    whose utility functions are on different scales) hides whether a
-    mechanism is winning by helping everyone or by trading off one role
-    against another. Per-role bars make that explicit.
-
-    aggregated_df must contain 'reward_<role>_mean' columns (added by
-    metrics.compute_metrics + experiment.run_experiment_sweep).
+    composition.
     """
     if "composition" not in aggregated_df.columns:
         return
@@ -598,7 +482,7 @@ def plot_per_role_rewards(aggregated_df, composition="standard", output_path=Non
     fig, axes = plt.subplots(nrows, ncols, figsize=(4.0 * ncols, 3.8 * nrows),
                              squeeze=False)
 
-    colors = ["#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de", "#3ba272", "#fc8452"]
+    colors = COLOR_PALETTE
     x = np.arange(len(mechanisms))
 
     for idx, (key, label) in enumerate(role_specs):
@@ -624,23 +508,13 @@ def plot_per_role_rewards(aggregated_df, composition="standard", output_path=Non
     )
     plt.tight_layout()
 
-    if output_path:
-        plt.savefig(output_path, bbox_inches="tight", dpi=150)
-
-    plt.close()
+    _save_current_figure(output_path, dpi=150)
 
 
 def plot_scale_robustness(aggregated_df, composition="standard", output_path=None):
     """
     Grouped bars showing whether the mechanism ranking is preserved across
     L/M/H withdrawal scales.
-
-    For the chosen composition (default 'standard'), plot crisis_rate,
-    social_welfare and average_reserve as grouped bars: x=mechanism,
-    one bar per scale within each mechanism group. Parallel bars across
-    scales = ranking preserved; crossings = scale-dependent ranking.
-
-    aggregated_df must contain 'scale' and 'composition' columns.
     """
     if "scale" not in aggregated_df.columns or "composition" not in aggregated_df.columns:
         return
@@ -660,7 +534,7 @@ def plot_scale_robustness(aggregated_df, composition="standard", output_path=Non
 
     fig, axes = plt.subplots(1, len(metrics), figsize=(5.5 * len(metrics), 5))
 
-    colors = ["#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de"]
+    colors = COLOR_PALETTE
     bar_width = 0.8 / len(scales)
     x = np.arange(len(mechanisms))
 
@@ -700,7 +574,4 @@ def plot_scale_robustness(aggregated_df, composition="standard", output_path=Non
     )
     plt.tight_layout()
 
-    if output_path:
-        plt.savefig(output_path, bbox_inches="tight", dpi=150)
-
-    plt.close()
+    _save_current_figure(output_path, dpi=150)

@@ -2,7 +2,7 @@
 
 This is intentionally the ONLY mechanism that uses CrewAI, because debate
 is the only mechanism that genuinely has N interacting agents with distinct
-roles — exactly what CrewAI was designed to orchestrate.
+roles exactly what CrewAI was designed to orchestrate.
 """
 
 import os
@@ -10,7 +10,7 @@ import time
 
 from dotenv import load_dotenv
 
-from src.llm_client import get_llm_model
+from src.llm_client import LLMResponse, get_llm_model, parse_per_dept_actions
 from src.coordination import CoordinationMechanism
 from src.prompts import ROLE_PROMPTS
 
@@ -19,7 +19,7 @@ load_dotenv()
 
 
 # `backstory` is shared with LLMDepartment via ROLE_PROMPTS so the persona
-# wording stays in sync across mechanisms. `role` and `goal` stay local
+# `role` and `goal` stay local
 # because CrewAI's Agent constructor takes them as separate fields.
 ROLE_METADATA = {
     "profit": {
@@ -152,16 +152,12 @@ class CrewAIDebateCoordination(CoordinationMechanism):
         start_time = time.perf_counter()
         llm = self._get_llm()
 
-        # Backfill: previous step's outcome is only observable now.
         if self._memory_log:
             self._memory_log[-1]["reserve_after"] = reserve_level
 
         memory_blurb = self._build_memory_context()
 
-        # `allow_delegation=True` lets agents query each other mid-debate
-        # (e.g. Growth asking Risk for a volatility threshold). Each
-        # delegation is an extra untracked LLM call, so cost.llm_calls
-        # becomes a lower bound.
+        # Delegation is disabled in production runs so LLM-call counts stay comparable.
         dept_agents = []
         for dept in departments:
             meta = ROLE_METADATA.get(dept.role, ROLE_METADATA["balanced"])
@@ -203,9 +199,6 @@ class CrewAIDebateCoordination(CoordinationMechanism):
             "department_count": str(len(departments)),
         }
 
-        # ------------------------------------------------------------------
-        # 2. ROUND 1 — Opening arguments (independent, parallel in spirit)
-        # ------------------------------------------------------------------
         opening_tasks = []
         for dept, agent, proposal in zip(departments, dept_agents, proposals):
             task = Task(
@@ -228,8 +221,6 @@ class CrewAIDebateCoordination(CoordinationMechanism):
             )
             opening_tasks.append(task)
 
-        # Round 2 — rebuttals see round-1 context; this is what makes it a
-        # debate rather than parallel elicitation.
         rebuttal_tasks = []
         for dept, agent, proposal in zip(departments, dept_agents, proposals):
             task = Task(
@@ -297,7 +288,6 @@ class CrewAIDebateCoordination(CoordinationMechanism):
         )
 
         try:
-            from src.llm_client import parse_per_dept_actions, LLMResponse
             result = crew.kickoff(inputs=crew_inputs)
             raw_output = getattr(result, "raw", str(result))
 
@@ -315,7 +305,6 @@ class CrewAIDebateCoordination(CoordinationMechanism):
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-        # `reserve_after` is backfilled on the NEXT decide() call.
         self._memory_log.append({
             "step": self._step_counter,
             "reserve_before": reserve_level,
@@ -324,8 +313,6 @@ class CrewAIDebateCoordination(CoordinationMechanism):
         })
         self._step_counter += 1
 
-        # llm_calls counts the scripted 2N+1 calls only; delegation sub-calls
-        # under allow_delegation=True are untracked, so this is a lower bound.
         cost = {
             "messages": 2 * len(proposals) + 1,
             "rounds": 3,

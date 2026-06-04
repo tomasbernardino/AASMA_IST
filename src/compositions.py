@@ -6,8 +6,8 @@ share the same role mixes.
 """
 
 
-# (display_name, role) tuples for each composition. The total number of
-# departments is always 5 — only the role mix changes.
+# (display_name, role) tuples for each composition. 
+# The total number of departments is always 5, only the role mix changes.
 COMPOSITION_SPECS = {
     "standard": [
         ("Growth Department", "profit"),
@@ -41,14 +41,6 @@ COMPOSITION_SPECS = {
 
 
 def make_compositions(dept_class, **dept_kwargs):
-    """
-    Return a dict {composition_name: factory()} for the given Department class.
-
-    Each factory returns a fresh list of 5 dept_class instances built with the
-    composition's (name, role) pairs and the caller's extra kwargs (e.g.
-    reserve_capacity / exploration_rate for `Department`, or model / temperature
-    for `LLMDepartment`).
-    """
     def make_factory(spec):
         def factory():
             return [dept_class(name, role, **dept_kwargs) for name, role in spec]

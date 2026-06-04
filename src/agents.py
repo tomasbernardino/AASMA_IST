@@ -2,24 +2,22 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from src.agent_common import (
+    build_justification,
+    compute_reward,
+    estimate_risk,
+    justification_type,
+)
+
 
 @dataclass
 class AgentState:
-    """Stores per-agent state for utility computation and justification."""
     prev_reserve: float = 100.0
     justification_type: str = "balancing"
 
 
 class Department:
-    """
-    Role-based department drawing from a common liquidity reserve.
-
-    Each department has:
-        - name
-        - role
-        - accumulated reward
-        - agent state for memory and utility computation
-    """
+    """Rule-based department with a role-specific withdrawal policy."""
 
     def __init__(self, name, role, reserve_capacity=100, exploration_rate=0.0):
         self.name = name
@@ -31,20 +29,12 @@ class Department:
         self.rng = np.random.default_rng()
 
     def reset(self, seed=None):
-        """Reset accumulated reward and state before a new simulation."""
         self.total_reward = 0.0
         self.state = AgentState()
         if seed is not None:
             self.rng = np.random.default_rng(seed)
 
     def propose_action(self, reserve_level):
-        """
-        Return the withdrawal policy proposed by the department.
-
-        With probability `exploration_rate`, the agent ignores its
-        deterministic policy and picks a uniformly random action.
-        This prevents lock-in and adds bounded rationality.
-        """
         if self.exploration_rate > 0 and self.rng.random() < self.exploration_rate:
             return self.rng.choice(["L", "M", "H"])
 
@@ -63,124 +53,39 @@ class Department:
         if self.role == "free_rider":
             return self._free_rider_policy(reserve_level)
 
-    # Per-role risk perception thresholds.
-    # Format: (high_risk_below, medium_risk_below)
-    _RISK_THRESHOLDS = {
-        "profit":         (10, 25),   # high tolerance — only panics at very low reserves
-        "sustainability": (30, 60),   # perceives danger earlier
-        "balanced":       (20, 40),   # moderate (same as original global thresholds)
-        "risk_averse":    (40, 70),   # most cautious — sees risk when others don't
-        "free_rider":     (0, 0),     # never sees risk
-    }
-
     def get_estimated_risk(self, reserve_level):
-        """
-        Estimate crisis risk for debate mechanism.
-
-        Returns: 1.0 (high), 0.5 (medium), 0.0 (low)
-
-        The thresholds depend on the department's role: profit-oriented
-        departments tolerate lower reserves before signalling danger,
-        while risk-averse departments raise the alarm much earlier.
-        """
-        high_thresh, med_thresh = self._RISK_THRESHOLDS.get(
-            self.role, (20, 40)
-        )
-        if reserve_level < high_thresh:
-            return 1.0
-        elif reserve_level < med_thresh:
-            return 0.5
-        return 0.0
+        return estimate_risk(self.role, reserve_level)
 
     def get_justification_type(self, proposed_action, reserve_level):
-        """
-        Return the justification type for the proposed action.
-        """
-        if self.role == "profit":
-            return "growth"
-        elif self.role == "sustainability":
-            return "liquidity_protection"
-        elif self.role == "risk_averse":
-            return "crisis_avoidance"
-        elif self.role == "free_rider":
-            return "exploitation"
-        else:
-            return "balancing"
+        return justification_type(self.role)
 
     def justify_action(self, proposed_action, reserve_level):
-        """
-        Return structured justification for the proposed action.
-        Used for debate mechanism.
-        """
-        risk = self.get_estimated_risk(reserve_level)
-        justification_type = self.get_justification_type(proposed_action, reserve_level)
-        return {
-            "proposed": proposed_action,
-            "risk_estimate": risk,
-            "justification_type": justification_type,
-            "role": self.role,
-        }
+        return build_justification(self.role, proposed_action, reserve_level)
 
     def receive_reward(self, withdrawal, reserve_level, crisis):
-        """
-        Role-specific utility function.
-        """
-        if self.role == "profit":
-            reward = withdrawal
-
-        elif self.role == "sustainability":
-            crisis_risk = 1.0 if reserve_level < 20 else 0.0
-            alpha = 5.0
-            reward = withdrawal - alpha * crisis_risk
-
-        elif self.role == "balanced":
-            reserve_deficit = max(0, 50 - reserve_level) / 50
-            beta = 3.0
-            reward = withdrawal - beta * reserve_deficit
-
-        elif self.role == "risk_averse":
-            if self.state.prev_reserve > 0:
-                volatility = abs(reserve_level - self.state.prev_reserve) / self.reserve_capacity
-            else:
-                volatility = 0.0
-            gamma = 2.0
-            reward = withdrawal - gamma * volatility
-
-        elif self.role == "free_rider":
-            reward = withdrawal * 1.5
-
-        else:
-            reward = withdrawal
-
-        if crisis:
-            reward -= 5.0
-
+        reward = compute_reward(
+            role=self.role,
+            withdrawal=withdrawal,
+            reserve_level=reserve_level,
+            crisis=crisis,
+            previous_reserve=self.state.prev_reserve,
+            reserve_capacity=self.reserve_capacity,
+        )
         self.total_reward += reward
-
         self.state.prev_reserve = reserve_level
-
         return reward
 
     def _growth_policy(self, reserve_level):
-        """
-        Growth prioritizes aggressive investment while liquidity is available.
-        """
         if reserve_level < 20:
             return "M"
         return "H"
 
     def _compliance_policy(self, reserve_level):
-        """
-        Compliance prioritizes reserve protection and sustainability.
-        """
         if reserve_level < 70:
             return "L"
         return "M"
 
     def _operations_policy(self, reserve_level):
-        """
-        Operations adapts spending to the state of the reserve.
-        """
         if reserve_level < 40:
             return "L"
         if reserve_level > 80:
@@ -188,15 +93,9 @@ class Department:
         return "M"
 
     def _risk_policy(self, reserve_level):
-        """
-        Risk strongly avoids liquidity crisis.
-        """
         if reserve_level < 90:
             return "L"
         return "M"
 
     def _free_rider_policy(self, reserve_level):
-        """
-        Free rider ignores reserve level and always takes H.
-        """
         return "H"

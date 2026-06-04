@@ -1,15 +1,8 @@
 """
 Environmental sensitivity sweep.
-
-Runs every rule-based coordination mechanism across a 3x3 grid of environmental
-hostility (recovery_noise_std x shock_probability), 10 seeds per cell, standard
-composition. Shows how robust each mechanism is to noisier recovery and more
+Shows how robust each mechanism is to noisier recovery and more
 frequent liquidity shocks.
 
-Outputs:
-    results/raw/sensitivity_detailed.csv     (one row per run)
-    results/raw/sensitivity_aggregated.csv   (one row per mechanism x cell)
-    results/figures/sensitivity_heatmap.png  (one heatmap per mechanism)
 """
 
 from pathlib import Path
@@ -18,40 +11,20 @@ import pandas as pd
 
 from src.environment import LiquidityReserveEnvironment
 from src.agents import Department
-from src.coordination import (
-    IndependentCoordination,
-    VotingCoordination,
-    AdaptiveVotingCoordination,
-    CentralizedRoleCoordination,
-    StructuredDebateCoordination,
-)
 from src.compositions import make_compositions
 from src.simulation import run_simulation
 from src.metrics import compute_metrics
 from src.plotting import plot_sensitivity_heatmap
+from src.study_config import DEFAULT_SHOCK_MAGNITUDE, build_rule_based_mechanisms
 
 
-# Standard composition only — sensitivity is over env params, not roles.
 create_departments = make_compositions(
     Department, reserve_capacity=100, exploration_rate=0.1,
 )["standard"]
 
 
-# 3x3 environmental hostility grid.
 RECOVERY_NOISE_LEVELS = [0.01, 0.05, 0.15]
 SHOCK_PROBABILITIES = [0.0, 0.05, 0.10]
-
-
-def build_mechanisms():
-    return [
-        IndependentCoordination(),
-        VotingCoordination(),
-        AdaptiveVotingCoordination(),
-        CentralizedRoleCoordination("profit"),
-        CentralizedRoleCoordination("sustainability"),
-        CentralizedRoleCoordination("risk_averse"),
-        StructuredDebateCoordination(),
-    ]
 
 
 def main():
@@ -61,7 +34,7 @@ def main():
     Path("results/raw").mkdir(parents=True, exist_ok=True)
     Path("results/figures").mkdir(parents=True, exist_ok=True)
 
-    mechanisms = build_mechanisms()
+    mechanisms = build_rule_based_mechanisms()
     all_metrics = []
 
     for noise in RECOVERY_NOISE_LEVELS:
@@ -71,7 +44,7 @@ def main():
                     environment = LiquidityReserveEnvironment(
                         recovery_noise_std=noise,
                         shock_probability=shock,
-                        shock_magnitude=10.0,
+                        shock_magnitude=DEFAULT_SHOCK_MAGNITUDE,
                     )
                     departments = create_departments()
 

@@ -8,10 +8,10 @@ Entry points that produce results:
 |-------------------------------------|-------------------------------------------------|
 | `main.py`                           | `results/raw/`, `results/figures/`              |
 | `sensitivity_analysis.py`           | `results/raw/sensitivity_*.csv`, `results/figures/sensitivity_heatmap.png` |
-| `main_llm.py`                       | `results/llm/` (and `results/llm/<model_slug>/` when `LLM_MODELS=a,b,c`) |
-| `main_llm_memory_ablation.py`       | `results/llm_memory/raw/`                       |
-| `main_llm_universalization.py`      | `results/universalization/{off,on}/{raw,figures}/` + `universalization_ablation.csv` |
-| `main_llm_negotiation.py`           | `results/negotiation/{raw,figures}/`            |
+| `main_llm.py`                       | `results/llm/` (and `results/llm/<model_slug>/` when `LLM_MODEL=a,b,c`) |
+| `main_llm_ablation.py memory`       | `results/llm_memory/raw/`                       |
+| `main_llm_ablation.py universalization`      | `results/universalization/{off,on}/{raw,figures}/` + `universalization_ablation.csv` |
+| `main_llm_ablation.py negotiation`           | `results/negotiation/{raw,figures}/`            |
 
 Sweep shapes are encoded in the scripts; counts below are what a complete run produces.
 
@@ -85,9 +85,9 @@ The role-selected centralized code emits `centralized_profit`,
 composition/role pairs where the leader role is absent. Voting and
 AdaptiveVoting are excluded from the LLM track (no natural LLM analog).
 
-**Single-model mode** (`LLM_MODELS` unset → script uses `LLM_MODEL`): outputs go flat into `results/llm/raw/` and `results/llm/figures/`.
+**Single-model mode** (`LLM_MODEL` unset → script uses `LLM_MODEL`): outputs go flat into `results/llm/raw/` and `results/llm/figures/`.
 
-**Multi-model mode** (`LLM_MODELS=a,b,c`): each model gets its own subdirectory `results/llm/<model_slug>/{raw,figures}` containing the full per-model output, plus a top-level `results/llm/raw/multi_model_aggregated.csv` and `results/llm/figures/model_comparison.png` for cross-model comparison.
+**Multi-model mode** (`LLM_MODEL=a,b,c`): each model gets its own subdirectory `results/llm/<model_slug>/{raw,figures}` containing the full per-model output, plus a top-level `results/llm/raw/multi_model_aggregated.csv` and `results/llm/figures/model_comparison.png` for cross-model comparison.
 
 Currently on disk: three model subdirs — `deepseek_deepseek-v4-flash/`, `google_gemma-4-31b-it/`, `openai_gpt-5.4-nano/`.
 
@@ -115,19 +115,19 @@ Cross-model bar chart on `composition="standard"`: each mechanism is grouped, on
 
 ## `results/llm_memory/raw/` — memory ablation
 
-Written by `main_llm_memory_ablation.py`. Sweep shape: **2 memory modes × 3 mechanisms × 1 composition × 1 seed = 6 runs**, standard composition only. Isolates "the agents are LLMs" from "the agents have cross-step memory".
+Written by `main_llm_ablation.py memory`. Sweep shape: **2 memory modes × 3 mechanisms × 1 composition × 1 seed = 6 runs**, standard composition only. Isolates "the agents are LLMs" from "the agents have cross-step memory".
 
 Memory modes: `previous` (window=1) vs `full_history` (window=5). Mechanisms: `independent`, `llm_centralized`, `crewai_debate`.
 
 - **`memory_ablation.csv`** (6 rows + header) — Same columns as the LLM `detailed_runs.csv` plus `memory_mode` and `memory_window`.
 
-No figures are written by the ablation script. (`main_llm_memory_ablation.py` also writes a `memory_ablation_summary.csv` — strict column-subset of the detail CSV — but it was removed as a duplicate; it will be re-created if you re-run the script.)
+No figures are written by the ablation script. (`main_llm_ablation.py memory` also writes a `memory_ablation_summary.csv` — strict column-subset of the detail CSV — but it was removed as a duplicate; it will be re-created if you re-run the script.)
 
 ---
 
 ## `results/universalization/` — universalization ablation
 
-Written by `main_llm_universalization.py`. Isolates the effect of a Kantian "universal-impact" prompt on LLM agent behaviour.
+Written by `main_llm_ablation.py universalization`. Isolates the effect of a Kantian "universal-impact" prompt on LLM agent behaviour.
 
 Sweep shape: **2 universalization settings × 1 mechanism (Independent) × 4 compositions × 1 seed = 8 runs**. Standard scale only. `MAX_STEPS` is controlled by `LLM_MAX_STEPS` (script default 10; the runs currently on disk were produced with `LLM_MAX_STEPS=20` from `.env`, matching `main_llm.py`).
 
@@ -143,7 +143,7 @@ The runs currently on disk used `LLM_MODEL=deepseek/deepseek-v4-flash`.
 
 ## `results/negotiation/` — free-negotiation mechanism
 
-Written by `main_llm_negotiation.py`. Head-to-head between `IndependentCoordination` (no coordination) and `FreeNegotiationCoordination` — a GovSim-style chat-room mechanism added in the GovSim-features commit.
+Written by `main_llm_ablation.py negotiation`. Head-to-head between `IndependentCoordination` (no coordination) and `FreeNegotiationCoordination` — a GovSim-style chat-room mechanism added in the GovSim-features commit.
 
 Sweep shape per model: **2 mechanisms × 4 compositions × 1 seed = 8 runs**. Standard scale only. `MAX_STEPS` is controlled by `LLM_MAX_STEPS` (script default 10; the runs currently on disk were produced with `LLM_MAX_STEPS=20` from `.env`).
 
@@ -151,7 +151,7 @@ Sweep shape per model: **2 mechanisms × 4 compositions × 1 seed = 8 runs**. St
 - `raw/aggregated_comparison.csv` — same.
 - `figures/mechanism_comparison.png` — reuses the multi-model plot to compare Independent vs FreeNegotiation across the four compositions.
 
-(`main_llm_negotiation.py` also writes a `negotiation_comparison.csv` that is byte-identical to `aggregated_comparison.csv` — removed as a duplicate; will be re-created if you re-run the script.)
+(`main_llm_ablation.py negotiation` also writes a `negotiation_comparison.csv` that is byte-identical to `aggregated_comparison.csv` — removed as a duplicate; will be re-created if you re-run the script.)
 
 `FreeNegotiationCoordination` is *not* in `main_llm.py`'s mechanism set, so this script is the only place it runs. The Independent baseline here is a fresh LLM draw and is not interchangeable with `main_llm.py`'s Independent row.
 

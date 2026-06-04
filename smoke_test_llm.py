@@ -19,10 +19,9 @@ from src.compositions import make_compositions
 from src.simulation import run_simulation
 
 
-MODEL = get_llm_model("SMOKE_MODEL")
+MODEL = get_llm_model()
 TEMPERATURE = 0.3
-MAX_STEPS = int(os.environ.get("SMOKE_STEPS", "10"))
-CREWAI_DELEGATION = os.environ.get("SMOKE_CREWAI_DELEGATION", "0") == "1"
+MAX_STEPS = 1
 
 
 def make_env():
@@ -97,7 +96,7 @@ def main():
         CrewAIDebateCoordination(
             model=MODEL,
             temperature=TEMPERATURE,
-            allow_delegation=CREWAI_DELEGATION,
+            allow_delegation=False,
         ),
     ]
 

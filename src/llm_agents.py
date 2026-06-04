@@ -1,15 +1,15 @@
+from src.agent_common import (
+    WITHDRAWAL_TO_ACTION,
+    build_justification,
+    compute_reward,
+    estimate_risk,
+    justification_type,
+)
 from src.llm_client import call_openrouter, get_llm_model, parse_action
 from src.prompts import ROLE_PROMPTS
-
+from src.prompts import build_universalization_prompt
 
 class LLMDepartment:
-    """Drop-in LLM replacement for the rule-based Department.
-
-    `memory_window` of 0 disables history (agent sees only the current
-    reserve); used by the memory-ablation experiment to isolate the
-    contribution of cross-step history.
-    """
-
     def __init__(self, name, role, model=None, temperature=0.3,
                  memory_window=5, universalization=False, n_departments=5):
         self.name = name
@@ -26,52 +26,22 @@ class LLMDepartment:
         self._recent_history = []
 
     def reset(self, seed=None):
-        """`seed` is accepted for interface parity with rule-based Department;
-        LLM behaviour is governed by temperature, not a local RNG."""
+        """seed is accepted for interface parity with rule-based Department;
+        LLM behavior is governed by temperature, not a local RNG."""
         self.total_reward = 0.0
         self._recent_history = []
         self.last_llm_calls = 0
         self.last_llm_latency_ms = 0.0
         self.last_llm_model = ""
 
-    _RISK_THRESHOLDS = {
-        "profit": (10, 25),
-        "sustainability": (30, 60),
-        "balanced": (20, 40),
-        "risk_averse": (40, 70),
-        "free_rider": (0, 0),  # never perceives risk
-    }
-
     def get_estimated_risk(self, reserve_level):
-        high_thresh, med_thresh = self._RISK_THRESHOLDS.get(
-            self.role, (20, 40)
-        )
-        if reserve_level < high_thresh:
-            return 1.0
-        if reserve_level < med_thresh:
-            return 0.5
-        return 0.0
+        return estimate_risk(self.role, reserve_level)
 
     def get_justification_type(self, proposed_action, reserve_level):
-        if self.role == "profit":
-            return "growth"
-        if self.role == "sustainability":
-            return "liquidity_protection"
-        if self.role == "risk_averse":
-            return "crisis_avoidance"
-        if self.role == "free_rider":
-            return "exploitation"
-        return "balancing"
+        return justification_type(self.role)
 
     def justify_action(self, proposed_action, reserve_level):
-        return {
-            "proposed": proposed_action,
-            "risk_estimate": self.get_estimated_risk(reserve_level),
-            "justification_type": self.get_justification_type(
-                proposed_action, reserve_level
-            ),
-            "role": self.role,
-        }
+        return build_justification(self.role, proposed_action, reserve_level)
 
     def propose_action(self, reserve_level, context=""):
         """Falls back to "M" on API errors so a transient provider failure
@@ -95,7 +65,6 @@ class LLMDepartment:
 
         univ_text = ""
         if self.universalization:
-            from src.prompts import build_universalization_prompt
             univ_text = "\n\n" + build_universalization_prompt(reserve_level, self.n_departments)
 
         context_text = f"\n\nContext from coordination:\n{context}" if context else ""
@@ -109,12 +78,9 @@ class LLMDepartment:
             f"Do not include any other text."
         )
 
-        # max_tokens=512 gives reasoning models (e.g. deepseek-v4-flash) room
-        # to think before emitting the L/M/H letter — at lower caps they burn
-        # the whole budget on hidden reasoning tokens and return empty content,
-        # which parse_action silently maps to "M". 512 is also safely above the
-        # >=16 minimum that Azure-served gpt-5.4-nano enforces. parse_action
-        # extracts the first L/M/H character regardless of preceding text.
+        # max_tokens=512 gives reasoning models room
+        # to think before emitting the L/M/H letter at lower caps they burn
+        # the whole budget on hidden reasoning tokens and return empty content
         try:
             response = call_openrouter(
                 messages=[
@@ -162,41 +128,25 @@ class LLMDepartment:
             return "(silence)"
 
     def receive_reward(self, withdrawal, reserve_level, crisis):
-        """Reward function (identical to rule-based Department)."""
-        if self.role == "profit":
-            reward = withdrawal
-        elif self.role == "sustainability":
-            crisis_risk = 1.0 if reserve_level < 20 else 0.0
-            alpha = 5.0
-            reward = withdrawal - alpha * crisis_risk
-        elif self.role == "balanced":
-            reserve_deficit = max(0, 50 - reserve_level) / 50
-            beta = 3.0
-            reward = withdrawal - beta * reserve_deficit
-        elif self.role == "risk_averse":
-            if len(self._recent_history) > 0:
-                prev_reserve = self._recent_history[-1]["reserve"]
-                volatility = abs(reserve_level - prev_reserve) / 100.0
-            else:
-                volatility = 0.0
-            gamma = 2.0
-            reward = withdrawal - gamma * volatility
-        elif self.role == "free_rider":
-            reward = withdrawal * 1.5  # higher reward for extracting value
-        else:
-            reward = withdrawal
-
-        if crisis:
-            reward -= 5.0
-
+        previous_reserve = (
+            self._recent_history[-1]["reserve"]
+            if self._recent_history else None
+        )
+        reward = compute_reward(
+            role=self.role,
+            withdrawal=withdrawal,
+            reserve_level=reserve_level,
+            crisis=crisis,
+            previous_reserve=previous_reserve,
+            reserve_capacity=100.0,
+        )
         self.total_reward += reward
 
         step = len(self._recent_history)
         self._recent_history.append({
             "step": step,
             "reserve": reserve_level,
-            "action": {1.0: "L", 2.0: "M", 3.0: "H"}.get(withdrawal, "?"),
+            "action": WITHDRAWAL_TO_ACTION.get(withdrawal, "?"),
             "reward": reward,
         })
-
         return reward

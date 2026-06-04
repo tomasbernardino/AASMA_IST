@@ -1,30 +1,12 @@
-# src/coordination.py
-
 from collections import Counter
 
 
 class CoordinationMechanism:
-    """
-    Base class for coordination mechanisms.
-
-    Each mechanism receives:
-        proposals: list of proposed spending policies from departments
-        reserve_level: current liquidity reserve
-        departments: list of departments
-
-    It returns:
-        final_actions: list of final policies, one per department
-        cost: coordination cost information
-    """
+    """Base interface for coordination mechanisms."""
 
     name = "base"
 
     def reset(self):
-        """
-        Called at the start of each simulation episode (once per seed).
-        Subclasses that carry state across decide() calls (e.g. cross-step
-        memory) override this to clear it. Stateless mechanisms can ignore.
-        """
         pass
 
     def decide(self, proposals, reserve_level=None, departments=None):
@@ -32,12 +14,7 @@ class CoordinationMechanism:
 
 
 class IndependentCoordination(CoordinationMechanism):
-    """
-    Baseline mechanism.
-
-    No coordination happens.
-    Each department follows its own proposed spending policy.
-    """
+    """No-coordination baseline."""
 
     name = "independent"
 
@@ -51,29 +28,19 @@ class IndependentCoordination(CoordinationMechanism):
 
 
 class VotingCoordination(CoordinationMechanism):
-    """
-    Voting mechanism.
-
-    Departments vote by proposing spending policies.
-    The majority policy becomes the final policy for everyone.
-
-    Example:
-        proposals = ["H", "H", "L", "M"]
-        final policy = "H"
-    """
+    """Majority proposal becomes every department's final action."""
 
     name = "voting"
 
     def decide(self, proposals, reserve_level=None, departments=None):
         vote_counts = Counter(proposals)
 
-        # Most common proposal wins.
         majority_action = vote_counts.most_common(1)[0][0]
 
         final_actions = [majority_action for _ in proposals]
 
         cost = {
-            "messages": len(proposals),  # each department sends one proposal
+            "messages": len(proposals),
             "rounds": 1,
         }
 
@@ -93,8 +60,6 @@ class AdaptiveVotingCoordination(CoordinationMechanism):
       R >= 40 (safe/caution): L=1, M=1, H=1  (standard majority)
       20 <= R < 40 (danger):  L=2, M=1, H=1  (L votes count double)
       R < 20  (critical):     L=3, M=1, H=0  (H votes disqualified)
-
-    Tie-break favours the more conservative option.
     """
 
     name = "adaptive_voting"
@@ -132,10 +97,7 @@ class AdaptiveVotingCoordination(CoordinationMechanism):
 
 
 class CentralizedCoordination(CoordinationMechanism):
-    """
-    Centralized mechanism.
-    One CFO/treasury leader decides for everyone.
-    """
+    """One selected leader sets an upper-bound action for everyone."""
 
     name = "centralized"
 
@@ -147,7 +109,6 @@ class CentralizedCoordination(CoordinationMechanism):
         leader_proposal = proposals[self.leader_index]
         leader = departments[self.leader_index] if departments else None
 
-        # Leader observes all proposals and adjusts based on group signals.
         conservative_count = sum(1 for p in proposals if p == "L")
 
         if conservative_count >= 4:
@@ -157,11 +118,7 @@ class CentralizedCoordination(CoordinationMechanism):
         else:
             leader_action = leader_proposal
 
-        # Per-department allocation:
-        # The leader's decision acts as an UPPER BOUND for each department.
-        # Conservative depts that proposed less than the leader keep their own
-        # (lower) proposal — the leader respects their mandate.
-        # Aggressive depts that proposed more than the leader are capped.
+        # The leader action caps aggressive proposals but preserves lower ones.
         action_rank = {"L": 0, "M": 1, "H": 2}
         final_actions = [
             p if action_rank[p] <= action_rank[leader_action] else leader_action
@@ -180,13 +137,7 @@ class CentralizedCoordination(CoordinationMechanism):
 
 
 class CentralizedRoleCoordination(CentralizedCoordination):
-    """
-    Centralized mechanism where the leader is selected by department role.
-
-    This supports profit-leader vs sustainability-leader vs risk-leader
-    comparisons without silently substituting another role when a composition
-    lacks the requested leader type.
-    """
+    """Centralized variant with leader selected by department role."""
 
     def __init__(self, target_role):
         self.target_role = target_role
@@ -249,11 +200,6 @@ class StructuredDebateCoordination(CoordinationMechanism):
             if j["risk_estimate"] >= 0.5 and j["proposed"] in ["M", "H"]
         )
 
-        # Determine coordination mode from priority rule chain.
-        # Modes apply per-department, not as a single global override:
-        #   "all_L"  — crisis: everyone gets L
-        #   "cap_H"  — caution: H proposals become M, L and M stay as-is
-        #   "own"    — safe: each dept executes its own proposal
         if medium_high_risk_count >= 3:
             mode = "all_L"
         elif high_risk_count >= 1 or (majority_action == "H" and reserve_level < 70):
@@ -264,10 +210,8 @@ class StructuredDebateCoordination(CoordinationMechanism):
         if mode == "all_L":
             final_actions = ["L" for _ in proposals]
         elif mode == "cap_H":
-            # Cap aggressive proposals: H → M, leave L and M intact
             final_actions = ["M" if p == "H" else p for p in proposals]
         else:
-            # Each dept executes its own proposal
             final_actions = list(proposals)
 
         cost = {
@@ -292,7 +236,6 @@ class LLMCentralizedCoordination(CoordinationMechanism):
         crisis_threshold: float = 5,
         memory_window: int = 5,
     ):
-        # Local import so the rule-based path doesn't load the LLM stack.
         from src.llm_client import get_llm_model
 
         self.model = model or get_llm_model()
@@ -338,11 +281,9 @@ class LLMCentralizedCoordination(CoordinationMechanism):
         if departments is None:
             raise ValueError("LLMCentralizedCoordination requires departments.")
 
-        # Local imports so the rule-based path doesn't load the LLM stack.
         from src.prompts import build_centralized_leader_prompt
         from src.llm_client import call_openrouter, parse_per_dept_actions
 
-        # Backfill: previous step's outcome is only observable now.
         if self._memory_log:
             self._memory_log[-1]["reserve_after"] = reserve_level
 
@@ -421,10 +362,8 @@ class FreeNegotiationCoordination(CoordinationMechanism):
         transcript = ""
         llm_latency = 0.0
 
-        # Phase 1: Free Discussion
         for r in range(self.chat_rounds):
             for dept in departments:
-                # Rule-based agents don't have chat() implemented, so we check.
                 if hasattr(dept, "chat"):
                     msg = dept.chat(reserve_level, transcript)
                     transcript += f"{dept.name} ({dept.role}): {msg}\n"
@@ -432,7 +371,6 @@ class FreeNegotiationCoordination(CoordinationMechanism):
                 else:
                     transcript += f"{dept.name} ({dept.role}): (Cannot chat, rule-based)\n"
 
-        # Phase 2: Action Proposal based on transcript
         final_actions = []
         for dept in departments:
             if hasattr(dept, "propose_action") and 'context' in dept.propose_action.__code__.co_varnames:

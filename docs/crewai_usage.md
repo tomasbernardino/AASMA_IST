@@ -82,13 +82,13 @@ Following the CrewAI quickstart pattern, dynamic simulation values are passed th
 
 ## Memory
 
-`CrewAIDebateCoordination` carries a `_memory_log` of recent decisions across simulation steps (default `memory_window=5`). The log is summarised and injected into the prompt so the moderator and dept agents have the same kind of cross-step context that `LLMDepartment` has had since day one. This is the confound the `main_llm_memory_ablation.py` experiment isolates by toggling `memory_window` between 1 and 5.
+`CrewAIDebateCoordination` carries a `_memory_log` of recent decisions across simulation steps (default `memory_window=5`). The log is summarised and injected into the prompt so the moderator and dept agents have the same kind of cross-step context that `LLMDepartment` has had since day one. This is the confound the `main_llm_ablation.py memory` experiment isolates by toggling `memory_window` between 1 and 5.
 
 `reset()` clears the log between simulation episodes — `run_simulation` calls it once per seed so different seeds are actually independent.
 
 ## `allow_delegation`
 
-The constructor takes `allow_delegation: bool = True`, but every production caller (`main_llm.py`, `main_llm_memory_ablation.py`, `smoke_test_llm.py`) passes `allow_delegation=False`. Why:
+The constructor takes `allow_delegation: bool = True`, but every production caller (`main_llm.py`, `main_llm_ablation.py memory`, `smoke_test_llm.py`) passes `allow_delegation=False`. Why:
 
 - **With delegation off**, each step is exactly `2N + 1` LLM calls (`N` opening + `N` rebuttal + `1` moderator). For `N=5` that's 11 coordinator-level calls.
 - **With delegation on**, CrewAI lets one agent issue mid-task sub-calls to "ask" another. Token cost balloons unpredictably, and `llm_calls` in the cost dict becomes a *lower bound* (sub-calls aren't tracked individually). Wall-clock latency stays accurate.
@@ -133,8 +133,6 @@ Secrets go in `.env`:
 ```env
 OPENROUTER_API_KEY=sk-or-your-key-here
 LLM_MODEL=deepseek/deepseek-v4-flash
-SMOKE_MODEL=deepseek/deepseek-v4-flash
-SMOKE_STEPS=1
 LLM_MAX_STEPS=20
 ```
 
@@ -163,10 +161,10 @@ If `allow_delegation=True`, CrewAI may perform additional sub-calls; the `llm_ca
 
 ## Verification
 
-Use the smoke test before launching any full LLM sweep:
+Use the one-step smoke test before launching any full LLM sweep:
 
 ```bash
-SMOKE_STEPS=1 python smoke_test_llm.py
+python smoke_test_llm.py
 ```
 
 A healthy run reports both LLM mechanisms parsing cleanly:
@@ -180,8 +178,7 @@ For the full LLM-track sweep (including multi-model comparison), use `main_llm.p
 
 ```bash
 python main_llm.py                                # single model from LLM_MODEL
-LLM_MODELS=a,b,c python main_llm.py               # multi-model sweep
-SMOKE=1 LLM_MODELS=a,b,c python main_llm.py       # cheap multi-model smoke
+LLM_MODEL=a,b,c python main_llm.py               # multi-model sweep
 ```
 
 Free OpenRouter models are useful for smoke tests, but they're not ideal for the full sweep because rate limits and latency can dominate the experiment. For practical LLM runs, keep `LLM_MAX_STEPS` modest unless you're using a fast, high-rate endpoint.
